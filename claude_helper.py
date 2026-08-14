@@ -1,12 +1,13 @@
-import anthropic
 import os
 import json
 import logging
-from database import db_session, Matchup, Roster, PlayerInjury, GameWeather
 
 logger = logging.getLogger(__name__)
 
-client = anthropic.Anthropic(api_key=os.getenv('CLAUDE_API_KEY'))
+# Import inside function to avoid initialization errors
+def get_client():
+    import anthropic
+    return anthropic.Anthropic(api_key=os.getenv('CLAUDE_API_KEY'))
 
 RECAP_PROMPT = """You are a sports analyst creating an entertaining weekly fantasy football recap for a league.
 
