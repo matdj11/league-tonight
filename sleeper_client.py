@@ -143,12 +143,10 @@ class SleeperClient:
             
             logger.info(f"Successfully synced Sleeper league {league_id}")
             
-            return {
-                "status": "synced",
-                "league_id": league_id,
-                "rosters": len(rosters),
-                "matchups": "synced"
-            }
+            return { "status": "synced",
+    "league_id": league_id,
+    "rosters": len(rosters) if isinstance(rosters, list) else 0,
+    "matchups": 0}
         
         except Exception as e:
             logger.error(f"Error syncing league: {str(e)}")
