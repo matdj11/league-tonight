@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Team Briefing - {{ league.name }}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0B0F17; color: #F5F3EE; padding: 40px 20px; }
+        .container { max-width: 700px; margin: 0 auto; }
+        .header { display: flex; justify-content: space-between; align-items: start; margin-bottom: 30px; }
+        .header-text .eyebrow { color: #5EEAD4; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 4px; }
+        .header h1 { font-size: 24px; font-weight: 800; }
+        .avatar { width: 36px; height: 36px; border-radius: 50%; background: #1F5A50; display: flex; align-items: center; justify-content: center; font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 600; color: #5EEAD4; }
+        .section-label { color: #5EEAD4; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; margin: 24px 0 12px; }
+        .insight { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid #2A3245; }
+        .insight:last-child { border-bottom: none; }
+        .insight-num { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #5EEAD4; width: 16px; flex-shrink: 0; }
+        .insight-text { font-size: 13px; line-height: 1.5; }
+        .insight-text b { color: #F5F3EE; }
+        .source-hint { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #5EEAD4; margin-top: 6px; cursor: pointer; }
+        .source-hint:hover { color: #FFB020; }
+        .source-detail { margin-top: 8px; padding: 10px; background: #1F5A50; border-radius: 8px; border-left: 3px solid #5EEAD4; }
+        .source-link { font-size: 11px; color: #5EEAD4; text-decoration: none; word-break: break-all; display: block; }
+        .source-link:hover { text-decoration: underline; }
+        .source-updated { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #8B93A7; margin-top: 6px; }
+        .flag-card { background: #1F5A50; border-radius: 12px; padding: 13px 14px; margin-top: 16px; border: 1px solid #2A3245; }
+        .flag-tag { font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; color: #5EEAD4; margin-bottom: 6px; }
+        .flag-headline { font-size: 13px; font-weight: 600; line-height: 1.4; color: #F5F3EE; }
+        .cta-row { margin-top: 16px; display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border: 1px solid #1F5A50; border-radius: 10px; }
+        .cta-row span { font-size: 12px; color: #8B93A7; }
+        .cta-row b { color: #5EEAD4; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="header-text">
+                <div class="eyebrow">Your Briefing</div>
+                <h1>Tuesday Morning</h1>
+            </div>
+            <div class="avatar">{{ team_id[0:1]|upper }}</div>
+        </div>
+        
+        <div class="section-label">3 things that changed</div>
+        
+        <div id="insights-container">
+            <div class="insight">
+                <div class="insight-num">01</div>
+                <div class="insight-text">Loading your personalized briefing...</div>
+            </div>
+        </div>
+        
+        <div class="flag-card">
+            <div class="flag-tag">Lineup Flag</div>
+            <div class="flag-headline" id="lineup-warning">Check back for lineup optimization tips</div>
+        </div>
+        
+        <div class="cta-row">
+            <span>Get this every morning</span>
+            <b>Turn on alerts →</b>
+        </div>
+    </div>
+    
+    <script>
+        // Load briefing data
+        const briefingData = {{ briefing|tojson }};
+        
+        const container = document.getElementById('insights-container');
+        container.innerHTML = '';
+        
+        if (briefingData && briefingData.insights) {
+            briefingData.insights.forEach((insight, idx) => {
+                const num = String(idx + 1).padStart(2, '0');
+                const html = `
+                    <div class="insight">
+                        <div class="insight-num">${num}</div>
+                        <div class="insight-text">
+                            ${insight.text}
+                            <div class="source-hint">📋 Source →</div>
+                            <div class="source-detail">
+                                <a href="${insight.source_url || '#'}" class="source-link">${insight.source}</a>
+                                <div class="source-updated">Updated recently</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                container.innerHTML += html;
+            });
+        }
+        
+        // Set lineup warning
+        if (briefingData && briefingData.lineup_warning) {
+            document.getElementById('lineup-warning').textContent = briefingData.lineup_warning;
+        }
+    </script>
+</body>
+</html>

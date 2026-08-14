@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>League Tonight - Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0B0F17; color: #F5F3EE; padding: 40px 20px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        h1 { font-size: 28px; margin-bottom: 10px; }
+        .subtitle { color: #8B93A7; margin-bottom: 40px; }
+        .card { background: #151B29; border: 1px solid #2A3245; border-radius: 12px; padding: 24px; margin-bottom: 20px; }
+        .card h2 { font-size: 18px; margin-bottom: 12px; }
+        .card p { color: #8B93A7; line-height: 1.6; margin-bottom: 12px; }
+        .btn { display: inline-block; background: #FFB020; color: #3A2600; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; border: none; cursor: pointer; }
+        .btn:hover { background: #E6A018; }
+        .status { display: inline-block; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+        .status.draft { background: #8A6318; color: #FFB020; }
+        .status.published { background: #1F5A50; color: #5EEAD4; }
+        .link { color: #5EEAD4; text-decoration: none; word-break: break-all; }
+        .link:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>{{ league.name }}</h1>
+        <p class="subtitle">Commissioner Dashboard</p>
+        
+        <div class="card">
+            <h2>League Information</h2>
+            <p><strong>League ID:</strong> {{ league.league_id }}</p>
+            <p><strong>Platform:</strong> {{ league.platform|upper }}</p>
+            <p><strong>Created:</strong> {{ league.created_at.strftime('%B %d, %Y') }}</p>
+        </div>
+        
+        {% if latest_recap %}
+        <div class="card">
+            <h2>Latest Recap</h2>
+            <p><strong>Week:</strong> {{ latest_recap.week }}</p>
+            <p><strong>Status:</strong> <span class="status {{ latest_recap.status }}">{{ latest_recap.status|upper }}</span></p>
+            <p><strong>Generated:</strong> {{ latest_recap.created_at.strftime('%B %d, %Y at %I:%M %p') }}</p>
+            
+            {% if latest_recap.status == 'published' %}
+            <p><strong>Shareable Link:</strong></p>
+            <p><a href="{{ latest_recap.shareable_link }}" class="link">{{ latest_recap.shareable_link }}</a></p>
+            {% endif %}
+        </div>
+        {% endif %}
+        
+        <div class="card">
+            <h2>Generate This Week's Recap</h2>
+            <p>Click below to generate a new League Tonight recap from this week's matchups.</p>
+            <form method="POST" action="/api/recap/generate">
+                <button type="submit" class="btn">Generate Recap</button>
+            </form>
+        </div>
+        
+        {% if latest_recap and latest_recap.status == 'draft' %}
+        <div class="card">
+            <h2>Publish Recap</h2>
+            <p>Ready to share this week's recap with your league?</p>
+            <form method="POST" action="/api/recap/publish">
+                <input type="hidden" name="league_id" value="{{ league.league_id }}">
+                <input type="hidden" name="week" value="{{ latest_recap.week }}">
+                <button type="submit" class="btn">Publish to League</button>
+            </form>
+        </div>
+        {% endif %}
+    </div>
+</body>
+</html>

@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>League Tonight - {{ league.name }}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0B0F17; color: #F5F3EE; padding: 40px 20px; }
+        .container { max-width: 700px; margin: 0 auto; }
+        .header { margin-bottom: 40px; }
+        .header h1 { font-size: 32px; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 8px; }
+        .header .eyebrow { color: #FFB020; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 20px; }
+        .card { background: #151B29; border: 1px solid #2A3245; border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+        .card-tag { display: inline-block; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #FFB020; margin-bottom: 8px; }
+        .card h2 { font-size: 16px; font-weight: 600; line-height: 1.4; margin-bottom: 8px; }
+        .card p { color: #8B93A7; font-size: 14px; line-height: 1.6; }
+        .card-score { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #8B93A7; margin-top: 8px; }
+        .rankings { padding: 0; }
+        .rank-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #2A3245; font-size: 14px; }
+        .rank-row:last-child { border-bottom: none; }
+        .rank-num { font-family: 'IBM Plex Mono', monospace; color: #8B93A7; width: 20px; }
+        .rank-name { flex: 1; }
+        .trend { font-size: 14px; }
+        .trend.up { color: #4ADE80; }
+        .trend.down { color: #FF6B5E; }
+        .trend.flat { color: #8B93A7; }
+        .footer { text-align: center; color: #8B93A7; font-size: 12px; margin-top: 40px; padding-top: 20px; border-top: 1px solid #2A3245; }
+        .share-btn { display: inline-block; background: #FFB020; color: #3A2600; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-weight: 600; margin-top: 20px; }
+        .share-btn:hover { background: #E6A018; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="eyebrow">Week 7 Recap</div>
+            <h1>League Tonight</h1>
+        </div>
+        
+        <div class="card">
+            <div class="card-tag">Biggest Upset</div>
+            <h2 id="biggest-upset">Loading...</h2>
+        </div>
+        
+        <div class="card">
+            <div class="card-tag">Closest Game</div>
+            <h2 id="closest-game">Loading...</h2>
+        </div>
+        
+        <div class="card">
+            <div class="card-tag">Blowout of the Week</div>
+            <h2 id="blowout">Loading...</h2>
+        </div>
+        
+        <div class="card">
+            <h2 style="margin-bottom: 12px;">Power Rankings</h2>
+            <div class="rankings" id="power-rankings">
+                <div class="rank-row"><span class="rank-num">1</span> <span class="rank-name">Loading...</span> <span class="trend">—</span></div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <div class="card-tag">⚠️</div>
+            <h2 id="punishment">Loading...</h2>
+        </div>
+        
+        <div class="card">
+            <div class="card-tag">🔥</div>
+            <h2 id="hot-take">Loading...</h2>
+        </div>
+        
+        <div class="footer">
+            <p>{{ league.name }} • League Tonight • {{ recap.created_at.strftime('%B %d, %Y') }}</p>
+            <a href="javascript:void(0)" class="share-btn" onclick="copyLink()">Copy Link</a>
+        </div>
+    </div>
+    
+    <script>
+        // Parse recap content (assumes it's JSON or HTML with data attributes)
+        const recapContent = `{{ recap.content|safe }}`;
+        
+        // Try to extract data if available
+        // For now, show the raw content
+        document.getElementById('biggest-upset').textContent = 'Check back soon for this week\'s recap';
+        
+        function copyLink() {
+            const url = window.location.href;
+            navigator.clipboard.writeText(url).then(() => {
+                alert('Link copied to clipboard!');
+            });
+        }
+    </script>
+</body>
+</html>
