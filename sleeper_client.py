@@ -91,3 +91,39 @@ class SleeperClient:
                     league_id=league_id,
                     team_id=str(roster['roster_id'])
                 ).first()
+                
+                if not existing:
+                    new_roster = Roster(
+                        id=str(uuid.uuid4()),
+                        league_id=league_id,
+                        team_id=str(roster['roster_id']),
+                        team_name=roster.get('display_name', f"Team {roster['roster_id']}"),
+                        owner_name=roster.get('owner_id'),
+                        players=roster.get('players', []),
+                        wins=roster.get('wins', 0),
+                        losses=roster.get('losses', 0),
+                        points_for=roster.get('points_for', 0),
+                        points_against=roster.get('points_against', 0)
+                    )
+                    db_session.add(new_roster)
+                    roster_count += 1
+                else:
+                    existing.team_name = roster.get('display_name', existing.team_name)
+                    existing.players = roster.get('players', [])
+                    existing.wins = roster.get('wins', 0)
+                    existing.losses = roster.get('losses', 0)
+                    existing.points_for = roster.get('points_for', 0)
+                    existing.points_against = roster.get('points_against', 0)
+            
+            db_session.commit()
+            logger.info(f"Successfully synced Sleeper league {league_id}")
+            
+            return {
+                "status": "synced",
+                "league_id": league_id,
+                "rosters": roster_count
+            }
+        
+        except Exception as e:
+            logger.error(f"Error syncing league: {str(e)}")
+            raise
