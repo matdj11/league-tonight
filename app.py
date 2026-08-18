@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 from database import init_db, db_session, League, Recap, Briefing, User, Roster
 from sleeper_client import SleeperClient
-from claude_helper import generate_recap, generate_draft_recap
+from claude_helper import generate_recap, generate_draft_recap, generate_briefing
 
 sleeper = SleeperClient()
 
@@ -162,6 +162,73 @@ def publish_recap():
         logger.error(f"Recap publish failed: {str(e)}")
         return jsonify({"status": "error", "error": str(e)}), 500
 
+@app.route('/api/claim-team', methods=['POST', 'GET'])
+def claim_team():
+    try:
+        league_id = request.args.get('league_id') or os.getenv('SLEEPER_LEAGUE_ID')
+        team_id = request.args.get('team_id')
+        email = request.args.get('email', 'default@example.com')
+
+        if not team_id:
+            return jsonify({"status": "team_id required"}), 400
+
+        roster = db_session.query(Roster).filter_by(league_id=league_id, team_id=team_id).first()
+        if not roster:
+            return jsonify({"status": "roster not found"}), 404
+
+        user = db_session.query(User).filter_by(email=email).first()
+        if not user:
+            user = User(id=str(uuid.uuid4()), email=email, claimed_teams=f"{league_id}:{team_id}")
+            db_session.add(user)
+        else:
+            user.claimed_teams = f"{league_id}:{team_id}"
+        db_session.commit()
+
+        return jsonify({
+            "status": "team claimed",
+            "league_id": league_id,
+            "team_id": team_id,
+            "team_name": roster.team_name
+        })
+    except Exception as e:
+        logger.error(f"Claim team failed: {str(e)}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route('/api/briefing/generate', methods=['POST', 'GET'])
+def generate_briefing_endpoint():
+    try:
+        league_id = request.args.get('league_id') or os.getenv('SLEEPER_LEAGUE_ID')
+        team_id = request.args.get('team_id')
+
+        if not team_id:
+            return jsonify({"status": "team_id required"}), 400
+
+        roster = db_session.query(Roster).filter_by(league_id=league_id, team_id=team_id).first()
+        if not roster:
+            return jsonify({"status": "roster not found"}), 404
+
+        briefing_data = generate_briefing(league_id, team_id)
+
+        briefing = Briefing(
+            id=str(uuid.uuid4()),
+            league_id=league_id,
+            team_id=team_id,
+            team_name=roster.team_name,
+            content=briefing_data
+        )
+        db_session.add(briefing)
+        db_session.commit()
+
+        return jsonify({
+            "status": "briefing generated",
+            "league_id": league_id,
+            "team_id": team_id,
+            "briefing": briefing_data
+        })
+    except Exception as e:
+        logger.error(f"Briefing generation failed: {str(e)}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
 @app.route('/dashboard')
 def dashboard():
     try:
@@ -185,6 +252,29 @@ def view_recap(league_id, week):
         return render_template('recap.html', recap=recap, league=league)
     except Exception as e:
         logger.error(f"Recap view error: {str(e)}")
+        return f"Error: {str(e)}", 500
+
+@app.route('/briefing')
+def view_briefing():
+    try:
+        league_id = request.args.get('league_id') or os.getenv('SLEEPER_LEAGUE_ID')
+        team_id = request.args.get('team_id')
+
+        if not team_id:
+            return "team_id required", 400
+
+        briefing = db_session.query(Briefing).filter_by(
+            league_id=league_id, team_id=team_id
+        ).order_by(Briefing.created_at.desc()).first()
+
+        if not briefing:
+            return "Briefing not found. Generate one first.", 404
+
+        league = db_session.query(League).filter_by(league_id=league_id).first()
+
+        return render_template('briefing.html', briefing=briefing.content, league=league, team_id=team_id)
+    except Exception as e:
+        logger.error(f"Briefing view error: {str(e)}")
         return f"Error: {str(e)}", 500
 
 @app.errorhandler(404)

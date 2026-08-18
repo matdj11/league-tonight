@@ -38,6 +38,23 @@ Keep it fun and conversational like a sports radio host. Reference actual team n
 
 Respond in HTML format using <h2> for section headers and <p> for text. Do not include <html>, <head>, or <body> tags - just the inner content."""
 
+BRIEFING_PROMPT = """You are a personal fantasy football coach giving a quick morning briefing to one manager in the league "{league_name}".
+
+Manager's team: {team_name}
+Manager's roster (player IDs): {roster_players}
+
+Give this manager 3 short, personalized insights about their team this week. Since we don't have live injury/news data yet, base insights on general roster construction (bye weeks unknown, depth at each position, etc.) and keep it useful and specific-sounding, not generic filler.
+
+Respond ONLY as a JSON object in this exact shape, no other text:
+{{
+  "insights": [
+    {{"text": "short insight text", "source": "short source label like 'Roster Analysis'"}},
+    {{"text": "short insight text", "source": "short source label"}},
+    {{"text": "short insight text", "source": "short source label"}}
+  ],
+  "lineup_warning": "one short sentence flagging something to double check, or null"
+}}"""
+
 def _extract_text(message):
     text = None
     for block in message.content:
@@ -108,3 +125,46 @@ def generate_draft_recap(league_id, draft_picks_text, league_name):
     except Exception as e:
         logger.error(f"Error generating draft recap with Claude: {str(e)}")
         return f"<h2>Draft recap generation failed</h2><p>Error: {str(e)}</p>"
+
+def generate_briefing(league_id, team_id):
+    try:
+        client = anthropic.Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
+
+        league = db_session.query(League).filter_by(league_id=league_id).first()
+        roster = db_session.query(Roster).filter_by(league_id=league_id, team_id=team_id).first()
+
+        if not roster:
+            return {"insights": [], "lineup_warning": "No roster found for this team."}
+
+        roster_players = ", ".join(roster.players[:10]) if roster.players else "No players on roster yet"
+
+        prompt = BRIEFING_PROMPT.format(
+            league_name=league.name if league else "your league",
+            team_name=roster.team_name,
+            roster_players=roster_players
+        )
+
+        message = client.messages.create(
+            model="claude-sonnet-5",
+            max_tokens=512,
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+
+        raw_text = _extract_text(message)
+
+        try:
+            briefing_data = json.loads(raw_text)
+        except Exception:
+            briefing_data = {
+                "insights": [{"text": raw_text, "source": "AI"}],
+                "lineup_warning": None
+            }
+
+        logger.info(f"Generated Claude briefing for team {team_id} in league {league_id}")
+        return briefing_data
+
+    except Exception as e:
+        logger.error(f"Error generating briefing with Claude: {str(e)}")
+        return {"insights": [{"text": f"Briefing generation failed: {str(e)}", "source": "Error"}], "lineup_warning": None}
