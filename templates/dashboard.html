@@ -31,3 +31,77 @@
         <div class="card">
             <h2>League Information</h2>
             <p><strong>League ID:</strong> {{ league.league_id }}</p>
+            <p><strong>Platform:</strong> {{ league.platform|upper }}</p>
+        </div>
+
+        {% if latest_recap %}
+        <div class="card">
+            <h2>Latest Recap</h2>
+            <p><strong>Week:</strong> {{ latest_recap.week }}</p>
+            <p><strong>Status:</strong> <span class="status {{ latest_recap.status }}">{{ latest_recap.status|upper }}</span></p>
+            {% if latest_recap.status == 'published' %}
+            <p><a href="/recap/{{ league.league_id }}/{{ latest_recap.week }}" class="link">View Recap →</a></p>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        <div class="card">
+            <h2>Generate This Week's Recap</h2>
+            <p>Generate, then publish to get a shareable link for your league.</p>
+            <button class="btn" id="gen_btn" onclick="generateRecap()">Generate Recap</button>
+            <button class="btn" id="pub_btn" onclick="publishRecap()" style="margin-left: 8px;">Publish Latest</button>
+            <div class="msg" id="msg"></div>
+        </div>
+    </div>
+
+    <script>
+        const leagueId = "{{ league.league_id }}";
+
+        async function generateRecap() {
+            const btn = document.getElementById('gen_btn');
+            const msg = document.getElementById('msg');
+            btn.disabled = true;
+            msg.textContent = 'Generating recap with Claude...';
+            msg.className = 'msg';
+            try {
+                const res = await fetch(`/api/recap/generate?league_id=${leagueId}&week=1`);
+                const data = await res.json();
+                if (data.status === 'recap generated') {
+                    msg.textContent = `Recap generated for week ${data.week}. Reloading...`;
+                    msg.className = 'msg success';
+                    setTimeout(() => window.location.reload(), 1200);
+                } else {
+                    throw new Error(data.error || 'Failed to generate recap.');
+                }
+            } catch (err) {
+                msg.textContent = err.message;
+                msg.className = 'msg error';
+                btn.disabled = false;
+            }
+        }
+
+        async function publishRecap() {
+            const btn = document.getElementById('pub_btn');
+            const msg = document.getElementById('msg');
+            btn.disabled = true;
+            msg.textContent = 'Publishing...';
+            msg.className = 'msg';
+            try {
+                const res = await fetch(`/api/recap/publish?league_id=${leagueId}&week=1`);
+                const data = await res.json();
+                if (data.status === 'published') {
+                    msg.textContent = `Published! Reloading...`;
+                    msg.className = 'msg success';
+                    setTimeout(() => window.location.reload(), 1200);
+                } else {
+                    throw new Error(data.error || 'Failed to publish recap.');
+                }
+            } catch (err) {
+                msg.textContent = err.message;
+                msg.className = 'msg error';
+                btn.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>
