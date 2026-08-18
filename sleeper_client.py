@@ -1,4 +1,3 @@
-cat > sleeper_client.py << 'EOF'
 import requests
 import logging
 from datetime import datetime
@@ -55,7 +54,6 @@ class SleeperClient:
             rosters = self.get_rosters(league_id)
             roster_count = 0
             for roster in rosters:
-                roster_id = str(uuid.uuid4())
                 existing = db_session.query(Roster).filter_by(
                     league_id=league_id,
                     team_id=str(roster['roster_id'])
@@ -63,7 +61,7 @@ class SleeperClient:
                 
                 if not existing:
                     new_roster = Roster(
-                        id=roster_id,
+                        id=str(uuid.uuid4()),
                         league_id=league_id,
                         team_id=str(roster['roster_id']),
                         team_name=roster.get('display_name', f"Team {roster['roster_id']}"),
@@ -85,7 +83,6 @@ class SleeperClient:
                     existing.points_against = roster.get('points_against', 0)
             
             db_session.commit()
-            
             logger.info(f"Successfully synced Sleeper league {league_id}")
             
             return {
@@ -97,4 +94,3 @@ class SleeperClient:
         except Exception as e:
             logger.error(f"Error syncing league: {str(e)}")
             raise
-EOF
