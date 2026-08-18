@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>League Tonight</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0B0F17; color: #F5F3EE; padding: 60px 20px; }
+        .container { max-width: 480px; margin: 0 auto; text-align: center; }
+        .eyebrow { color: #FFB020; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 12px; }
+        h1 { font-size: 32px; font-weight: 800; margin-bottom: 16px; letter-spacing: -0.02em; }
+        .subtitle { color: #8B93A7; font-size: 15px; line-height: 1.6; margin-bottom: 40px; }
+        .card { background: #151B29; border: 1px solid #2A3245; border-radius: 12px; padding: 28px; text-align: left; }
+        .card label { display: block; font-size: 12px; color: #8B93A7; margin-bottom: 8px; }
+        .card input { width: 100%; padding: 12px 14px; background: #0B0F17; border: 1px solid #2A3245; border-radius: 8px; color: #F5F3EE; font-size: 14px; margin-bottom: 16px; }
+        .card input:focus { outline: none; border-color: #FFB020; }
+        .card .hint { font-size: 11px; color: #8B93A7; margin-top: -10px; margin-bottom: 20px; line-height: 1.5; }
+        .btn { width: 100%; background: #FFB020; color: #3A2600; padding: 14px; border-radius: 8px; font-weight: 700; font-size: 14px; border: none; cursor: pointer; }
+        .btn:hover { background: #E6A018; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .status { margin-top: 16px; font-size: 13px; color: #8B93A7; min-height: 20px; }
+        .status.error { color: #FF6B5E; }
+        .status.success { color: #5EEAD4; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="eyebrow">Commissioner Setup</div>
+        <h1>League Tonight</h1>
+        <p class="subtitle">Paste your Sleeper league ID below to connect your league and get your first recap.</p>
+
+        <div class="card">
+            <label for="league_id">Sleeper League ID</label>
+            <input type="text" id="league_id" placeholder="e.g. 1394096888944295936" />
+            <div class="hint">Find this in your Sleeper league URL: sleeper.app/leagues/<strong>THIS PART</strong></div>
+            <button class="btn" id="connect_btn" onclick="connectLeague()">Connect League</button>
+            <div class="status" id="status"></div>
+        </div>
+    </div>
+
+    <script>
+        async function connectLeague() {
+            const leagueId = document.getElementById('league_id').value.trim();
+            const statusEl = document.getElementById('status');
+            const btn = document.getElementById('connect_btn');
+
+            if (!leagueId) {
+                statusEl.textContent = 'Please enter a league ID.';
+                statusEl.className = 'status error';
+                return;
+            }
+
+            btn.disabled = true;
+            statusEl.textContent = 'Connecting to Sleeper...';
+            statusEl.className = 'status';
+
+            try {
+                const syncRes = await fetch(`/api/league/sync?league_id=${encodeURIComponent(leagueId)}`);
+                const syncData = await syncRes.json();
+
+                if (syncData.status !== 'sync complete') {
+                    throw new Error(syncData.error || 'Could not sync league. Check the ID and try again.');
+                }
+
+                statusEl.textContent = 'Connected! Redirecting to your dashboard...';
+                statusEl.className = 'status success';
+
+                setTimeout(() => {
+                    window.location.href = `/dashboard?league_id=${encodeURIComponent(leagueId)}`;
+                }, 1000);
+
+            } catch (err) {
+                statusEl.textContent = err.message || 'Something went wrong. Double check your league ID.';
+                statusEl.className = 'status error';
+                btn.disabled = false;
+            }
+        }
+
+        document.getElementById('league_id').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') connectLeague();
+        });
+    </script>
+</body>
+</html>
