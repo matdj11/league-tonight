@@ -50,7 +50,13 @@ def generate_recap(league_id, week):
             ]
         )
         
-        recap_html = message.content[0].text
+        recap_html = None
+        for block in message.content:
+            if hasattr(block, "text"):
+                recap_html = block.text
+                break
+        if not recap_html:
+            recap_html = "<h2>No text content returned</h2>"
         logger.info(f"Generated Claude recap for league {league_id}")
         return recap_html
     
