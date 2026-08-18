@@ -19,6 +19,10 @@ from claude_helper import generate_recap, generate_draft_recap, generate_briefin
 
 sleeper = SleeperClient()
 
+@app.route('/')
+def index():
+    return render_template('index.html')
+
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify({"status": "ok"})
