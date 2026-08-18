@@ -30,30 +30,3 @@ def generate_recap(league_id, week):
         rosters = db_session.query(Roster).filter_by(league_id=league_id).all()
         
         if not rosters:
-            return "<h2>No roster data yet</h2><p>Sync your league first to generate a real recap.</p>"
-        
-        standings_text = "\n".join([
-            f"{r.team_name}: {r.wins}-{r.losses}, {r.points_for} points for"
-            for r in rosters
-        ])
-        
-        prompt = RECAP_PROMPT.format(
-            league_name=league.name,
-            standings=standings_text
-        )
-        
-        message = client.messages.create(
-            model="claude-3-5-sonnet-20241022",
-            max_tokens=1024,
-            messages=[
-                {"role": "user", "content": prompt}
-            ]
-        )
-        
-        recap_html = message.content[0].text
-        logger.info(f"Generated Claude recap for league {league_id}")
-        return recap_html
-    
-    except Exception as e:
-        logger.error(f"Error generating recap with Claude: {str(e)}")
-        return f"<h2>Recap generation failed</h2><p>Error: {str(e)}</p>"
