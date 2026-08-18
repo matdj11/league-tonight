@@ -76,7 +76,7 @@ def generate_recap_endpoint():
         league = db_session.query(League).filter_by(league_id=league_id).first()
         if not league:
             return jsonify({"status": "league not found"}), 404
-        recap_content = f"<h1>{league.name} - Week {week}</h1><p>Recap generated</p>"
+        recap_content = generate_recap(league_id, week)
         recap = Recap(
             id=str(uuid.uuid4()),
             league_id=league_id,
