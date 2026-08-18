@@ -9,15 +9,36 @@
         .header .eyebrow { color: #5EEAD4; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 4px; }
         .header h1 { font-size: 24px; font-weight: 800; margin-bottom: 30px; }
         .insight { padding: 12px 0; border-bottom: 1px solid #2A3245; font-size: 13px; line-height: 1.5; }
+        .insight-source { font-family: monospace; font-size: 10px; color: #5EEAD4; margin-top: 6px; }
+        .flag-card { background: #1F5A50; border-radius: 12px; padding: 13px 14px; margin-top: 16px; border: 1px solid #2A3245; }
+        .flag-tag { font-family: monospace; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; color: #5EEAD4; margin-bottom: 6px; }
+        .flag-headline { font-size: 13px; font-weight: 600; line-height: 1.4; color: #F5F3EE; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <div class="eyebrow">Your Briefing</div>
-            <h1>Team Briefing</h1>
+            <h1>Team Briefing{% if league %} - {{ league.name }}{% endif %}</h1>
         </div>
-        <div class="insight">Briefing content coming soon.</div>
+
+        {% if briefing and briefing.insights %}
+            {% for insight in briefing.insights %}
+            <div class="insight">
+                {{ insight.text }}
+                <div class="insight-source">📋 {{ insight.source }}</div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="insight">No insights available yet.</div>
+        {% endif %}
+
+        {% if briefing and briefing.lineup_warning %}
+        <div class="flag-card">
+            <div class="flag-tag">Lineup Flag</div>
+            <div class="flag-headline">{{ briefing.lineup_warning }}</div>
+        </div>
+        {% endif %}
     </div>
 </body>
 </html>
