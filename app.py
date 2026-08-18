@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 from database import init_db, db_session, League, Recap, Briefing, User, Roster
 from sleeper_client import SleeperClient
+from claude_helper import generate_recap
 
 sleeper = SleeperClient()
 
