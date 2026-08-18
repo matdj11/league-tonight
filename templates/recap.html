@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>League Tonight - {{ league.name }}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0B0F17; color: #F5F3EE; padding: 40px 20px; }
+        .container { max-width: 700px; margin: 0 auto; }
+        .header { margin-bottom: 40px; }
+        .header h1 { font-size: 32px; font-weight: 800; margin-bottom: 8px; }
+        .header .eyebrow { color: #FFB020; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 20px; }
+        .card { background: #151B29; border: 1px solid #2A3245; border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+        .footer { text-align: center; color: #8B93A7; font-size: 12px; margin-top: 40px; padding-top: 20px; border-top: 1px solid #2A3245; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="eyebrow">Week {{ recap.week }} Recap</div>
+            <h1>League Tonight</h1>
+        </div>
+        
+        <div class="card">
+            {{ recap.content|safe }}
+        </div>
+        
+        <div class="footer">
+            <p>{{ league.name }} • League Tonight</p>
+        </div>
+    </div>
+</body>
+</html>
