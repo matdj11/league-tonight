@@ -22,26 +22,52 @@ Keep it fun and conversational, like a sports radio host. Reference actual team 
 
 Respond in HTML format using <h2> for section headers and <p> for text. Do not include <html>, <head>, or <body> tags - just the inner content."""
 
+DRAFT_PROMPT = """You are a sports analyst creating a fun, entertaining recap of a fantasy football draft for a league called "{league_name}".
+
+Here are the draft picks in order:
+
+{draft_picks}
+
+Create an entertaining draft recap that includes:
+1. Best value pick (a player picked later than expected, use your judgment on ADP if known, otherwise just pick a fun one)
+2. Riskiest/boldest pick of the draft
+3. A "best draft" call-out for one team, with a short reason
+4. One spicy AI hot take about how the draft went overall
+
+Keep it fun and conversational like a sports radio host. Reference actual team names and player names.
+
+Respond in HTML format using <h2> for section headers and <p> for text. Do not include <html>, <head>, or <body> tags - just the inner content."""
+
+def _extract_text(message):
+    text = None
+    for block in message.content:
+        if hasattr(block, "text"):
+            text = block.text
+            break
+    if not text:
+        text = "<h2>No text content returned</h2>"
+    return text
+
 def generate_recap(league_id, week):
     try:
-        client = anthropic.Anthropic(api_key=os.getenv('CLAUDE_API_KEY'))
-        
+        client = anthropic.Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
+
         league = db_session.query(League).filter_by(league_id=league_id).first()
         rosters = db_session.query(Roster).filter_by(league_id=league_id).all()
-        
+
         if not rosters:
             return "<h2>No roster data yet</h2><p>Sync your league first to generate a real recap.</p>"
-        
-        standings_text = "\n".join([
+
+        standings_text = chr(10).join([
             f"{r.team_name}: {r.wins}-{r.losses}, {r.points_for} points for"
             for r in rosters
         ])
-        
+
         prompt = RECAP_PROMPT.format(
             league_name=league.name,
             standings=standings_text
         )
-        
+
         message = client.messages.create(
             model="claude-sonnet-5",
             max_tokens=1024,
@@ -49,17 +75,36 @@ def generate_recap(league_id, week):
                 {"role": "user", "content": prompt}
             ]
         )
-        
-        recap_html = None
-        for block in message.content:
-            if hasattr(block, "text"):
-                recap_html = block.text
-                break
-        if not recap_html:
-            recap_html = "<h2>No text content returned</h2>"
+
+        recap_html = _extract_text(message)
         logger.info(f"Generated Claude recap for league {league_id}")
         return recap_html
-    
+
     except Exception as e:
         logger.error(f"Error generating recap with Claude: {str(e)}")
         return f"<h2>Recap generation failed</h2><p>Error: {str(e)}</p>"
+
+def generate_draft_recap(league_id, draft_picks_text, league_name):
+    try:
+        client = anthropic.Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
+
+        prompt = DRAFT_PROMPT.format(
+            league_name=league_name,
+            draft_picks=draft_picks_text
+        )
+
+        message = client.messages.create(
+            model="claude-sonnet-5",
+            max_tokens=1024,
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+
+        recap_html = _extract_text(message)
+        logger.info(f"Generated Claude draft recap for league {league_id}")
+        return recap_html
+
+    except Exception as e:
+        logger.error(f"Error generating draft recap with Claude: {str(e)}")
+        return f"<h2>Draft recap generation failed</h2><p>Error: {str(e)}</p>"

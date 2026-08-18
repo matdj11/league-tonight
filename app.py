@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 from database import init_db, db_session, League, Recap, Briefing, User, Roster
 from sleeper_client import SleeperClient
-from claude_helper import generate_recap
+from claude_helper import generate_recap, generate_draft_recap
 
 sleeper = SleeperClient()
 
@@ -90,6 +90,55 @@ def generate_recap_endpoint():
         return jsonify({"status": "recap generated", "league_id": league_id, "week": week})
     except Exception as e:
         logger.error(f"Recap generation failed: {str(e)}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route('/api/recap/draft', methods=['POST', 'GET'])
+def generate_draft_recap_endpoint():
+    try:
+        league_id = request.args.get('league_id') or os.getenv('SLEEPER_LEAGUE_ID')
+
+        league = db_session.query(League).filter_by(league_id=league_id).first()
+        if not league:
+            return jsonify({"status": "league not found"}), 404
+
+        rosters = db_session.query(Roster).filter_by(league_id=league_id).all()
+        roster_map = {r.team_id: r.team_name for r in rosters}
+
+        draft_id = sleeper.get_draft_id(league_id)
+        if not draft_id:
+            return jsonify({"status": "no draft found for this league"}), 404
+
+        picks = sleeper.get_draft_picks(draft_id)
+        players = sleeper.get_players_map()
+
+        picks_lines = []
+        for pick in picks:
+            player_id = pick.get('player_id')
+            player_info = players.get(player_id, {})
+            player_name = player_info.get('full_name', f"Player {player_id}")
+            position = player_info.get('position', '')
+            roster_id = str(pick.get('roster_id'))
+            team_name = roster_map.get(roster_id, f"Team {roster_id}")
+            pick_no = pick.get('pick_no')
+            picks_lines.append(f"Pick {pick_no}: {team_name} selected {player_name} ({position})")
+
+        draft_picks_text = chr(10).join(picks_lines)
+
+        recap_content = generate_draft_recap(league_id, draft_picks_text, league.name)
+
+        recap = Recap(
+            id=str(uuid.uuid4()),
+            league_id=league_id,
+            week="draft",
+            content=recap_content,
+            status='draft'
+        )
+        db_session.add(recap)
+        db_session.commit()
+
+        return jsonify({"status": "draft recap generated", "league_id": league_id})
+    except Exception as e:
+        logger.error(f"Draft recap generation failed: {str(e)}")
         return jsonify({"status": "error", "error": str(e)}), 500
 
 @app.route('/api/recap/publish', methods=['POST', 'GET'])

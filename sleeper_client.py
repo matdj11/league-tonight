@@ -32,6 +32,39 @@ class SleeperClient:
             logger.error(f"Error fetching rosters: {str(e)}")
             raise
     
+    def get_draft_id(self, league_id):
+        try:
+            url = f"{BASE_URL}/league/{league_id}/drafts"
+            response = self.session.get(url)
+            response.raise_for_status()
+            drafts = response.json()
+            if drafts:
+                return drafts[0]['draft_id']
+            return None
+        except Exception as e:
+            logger.error(f"Error fetching draft id: {str(e)}")
+            raise
+    
+    def get_draft_picks(self, draft_id):
+        try:
+            url = f"{BASE_URL}/draft/{draft_id}/picks"
+            response = self.session.get(url)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Error fetching draft picks: {str(e)}")
+            raise
+    
+    def get_players_map(self):
+        try:
+            url = f"{BASE_URL}/players/nfl"
+            response = self.session.get(url)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Error fetching players: {str(e)}")
+            raise
+    
     def sync_league(self, league_id):
         try:
             league_data = self.get_league(league_id)
@@ -58,39 +91,3 @@ class SleeperClient:
                     league_id=league_id,
                     team_id=str(roster['roster_id'])
                 ).first()
-                
-                if not existing:
-                    new_roster = Roster(
-                        id=str(uuid.uuid4()),
-                        league_id=league_id,
-                        team_id=str(roster['roster_id']),
-                        team_name=roster.get('display_name', f"Team {roster['roster_id']}"),
-                        owner_name=roster.get('owner_id'),
-                        players=roster.get('players', []),
-                        wins=roster.get('wins', 0),
-                        losses=roster.get('losses', 0),
-                        points_for=roster.get('points_for', 0),
-                        points_against=roster.get('points_against', 0)
-                    )
-                    db_session.add(new_roster)
-                    roster_count += 1
-                else:
-                    existing.team_name = roster.get('display_name', existing.team_name)
-                    existing.players = roster.get('players', [])
-                    existing.wins = roster.get('wins', 0)
-                    existing.losses = roster.get('losses', 0)
-                    existing.points_for = roster.get('points_for', 0)
-                    existing.points_against = roster.get('points_against', 0)
-            
-            db_session.commit()
-            logger.info(f"Successfully synced Sleeper league {league_id}")
-            
-            return {
-                "status": "synced",
-                "league_id": league_id,
-                "rosters": roster_count
-            }
-        
-        except Exception as e:
-            logger.error(f"Error syncing league: {str(e)}")
-            raise
