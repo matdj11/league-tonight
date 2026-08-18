@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>League Tonight - Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0B0F17; color: #F5F3EE; padding: 40px 20px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        h1 { font-size: 28px; margin-bottom: 10px; }
+        .subtitle { color: #8B93A7; margin-bottom: 40px; }
+        .card { background: #151B29; border: 1px solid #2A3245; border-radius: 12px; padding: 24px; margin-bottom: 20px; }
+        .card h2 { font-size: 18px; margin-bottom: 12px; }
+        .card p { color: #8B93A7; line-height: 1.6; margin-bottom: 12px; }
+        .btn { display: inline-block; background: #FFB020; color: #3A2600; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; border: none; cursor: pointer; }
+        .status { display: inline-block; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+        .status.draft { background: #8A6318; color: #FFB020; }
+        .status.published { background: #1F5A50; color: #5EEAD4; }
+        .link { color: #5EEAD4; text-decoration: none; word-break: break-all; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>{{ league.name }}</h1>
+        <p class="subtitle">Commissioner Dashboard</p>
+        
+        <div class="card">
+            <h2>League Information</h2>
+            <p><strong>League ID:</strong> {{ league.league_id }}</p>
+            <p><strong>Platform:</strong> {{ league.platform|upper }}</p>
+        </div>
+        
+        {% if latest_recap %}
+        <div class="card">
+            <h2>Latest Recap</h2>
+            <p><strong>Week:</strong> {{ latest_recap.week }}</p>
+            <p><strong>Status:</strong> <span class="status {{ latest_recap.status }}">{{ latest_recap.status|upper }}</span></p>
+        </div>
+        {% endif %}
+        
+        <div class="card">
+            <h2>Generate This Week's Recap</h2>
+            <p>Click below to generate a new League Tonight recap.</p>
+            <a href="/api/recap/generate?league_id={{ league.league_id }}" class="btn">Generate Recap</a>
+        </div>
+    </div>
+</body>
+</html>
