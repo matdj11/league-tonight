@@ -11,37 +11,23 @@
         .card { background: #151B29; border: 1px solid #2A3245; border-radius: 12px; padding: 24px; margin-bottom: 20px; }
         .card h2 { font-size: 18px; margin-bottom: 12px; }
         .card p { color: #8B93A7; line-height: 1.6; margin-bottom: 12px; }
-        .btn { display: inline-block; background: #FFB020; color: #3A2600; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; border: none; cursor: pointer; }
+        .btn { display: inline-block; background: #FFB020; color: #3A2600; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; border: none; cursor: pointer; font-size: 14px; }
+        .btn:hover { background: #E6A018; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
         .status { display: inline-block; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: 600; }
         .status.draft { background: #8A6318; color: #FFB020; }
         .status.published { background: #1F5A50; color: #5EEAD4; }
         .link { color: #5EEAD4; text-decoration: none; word-break: break-all; }
+        .msg { margin-top: 12px; font-size: 13px; color: #8B93A7; min-height: 18px; }
+        .msg.success { color: #5EEAD4; }
+        .msg.error { color: #FF6B5E; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>{{ league.name }}</h1>
         <p class="subtitle">Commissioner Dashboard</p>
-        
+
         <div class="card">
             <h2>League Information</h2>
             <p><strong>League ID:</strong> {{ league.league_id }}</p>
-            <p><strong>Platform:</strong> {{ league.platform|upper }}</p>
-        </div>
-        
-        {% if latest_recap %}
-        <div class="card">
-            <h2>Latest Recap</h2>
-            <p><strong>Week:</strong> {{ latest_recap.week }}</p>
-            <p><strong>Status:</strong> <span class="status {{ latest_recap.status }}">{{ latest_recap.status|upper }}</span></p>
-        </div>
-        {% endif %}
-        
-        <div class="card">
-            <h2>Generate This Week's Recap</h2>
-            <p>Click below to generate a new League Tonight recap.</p>
-            <a href="/api/recap/generate?league_id={{ league.league_id }}" class="btn">Generate Recap</a>
-        </div>
-    </div>
-</body>
-</html>
