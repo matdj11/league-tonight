@@ -321,6 +321,45 @@ def ai_resolve_team_for_names(names):
         logger.warning(f"AI team resolution failed: {str(e)}")
         return {}
 
+PLAYER_INFO_LOOKUP_PROMPT = """You are an NFL roster expert. For each player name listed below, identify their current 2026 NFL team (2-3 letter abbreviation like SF, KC, NYJ) and position (QB, RB, WR, TE, K, or DST for defenses).
+
+Player names:
+{names}
+
+Respond ONLY as a JSON object mapping each exact player name (as given) to an object with "team" and "position". If you're not confident about either, use null for that field. No other text.
+
+Example format:
+{{
+  "Christian McCaffrey": {{"team": "SF", "position": "RB"}},
+  "Some Unknown Player": {{"team": null, "position": null}}
+}}"""
+
+def ai_resolve_player_info_for_names(names):
+    """Ask Claude to identify team + position for player names Sleeper's
+    database couldn't match. Returns dict name -> {'team', 'position'} or {}."""
+    if not names:
+        return {}
+    try:
+        client = anthropic.Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
+
+        prompt = PLAYER_INFO_LOOKUP_PROMPT.format(names=", ".join(names))
+
+        message = client.messages.create(
+            model="claude-sonnet-5",
+            max_tokens=1024,
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+
+        raw_text = _extract_text(message)
+        result = _parse_json_safely(raw_text, {})
+        return {k: v for k, v in result.items() if isinstance(v, dict)}
+
+    except Exception as e:
+        logger.warning(f"AI player info resolution failed: {str(e)}")
+        return {}
+
 def generate_lineup_suggestion(league_id, team_id, weather_notes=None, news_notes=None, projection_notes=None):
     try:
         client = anthropic.Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
