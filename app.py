@@ -689,6 +689,30 @@ def get_current_matchup():
         logger.error(f"Get current matchup failed: {str(e)}")
         return jsonify({"status": "error", "error": str(e)}), 500
 
+@app.route('/api/roster/update-players', methods=['POST'])
+def update_roster_players():
+    try:
+        data = request.get_json()
+        league_id = data.get('league_id')
+        team_id = data.get('team_id')
+        players_raw = data.get('players', '')
+
+        if not league_id or not team_id:
+            return jsonify({"status": "error", "error": "league_id and team_id required"}), 400
+
+        roster = db_session.query(Roster).filter_by(league_id=league_id, team_id=team_id).first()
+        if not roster:
+            return jsonify({"status": "error", "error": "roster not found"}), 404
+
+        players_list = [p.strip() for p in players_raw.split(',') if p.strip()]
+        roster.players = players_list
+        db_session.commit()
+
+        return jsonify({"status": "updated", "players": players_list})
+    except Exception as e:
+        logger.error(f"Update roster players failed: {str(e)}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
 @app.route('/api/roster/full', methods=['GET'])
 def get_full_roster():
     try:
