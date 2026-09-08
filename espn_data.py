@@ -82,4 +82,37 @@ def get_relevant_news(player_names):
 
         for name in player_names:
             name_lower = name.lower()
-            for article in
+            for article in articles:
+                headline = article.get("headline", "")
+                description = article.get("description", "")
+                combined = f"{headline} {description}".lower()
+                if name_lower in combined:
+                    link = ""
+                    links = article.get("links", {})
+                    if isinstance(links, dict):
+                        web = links.get("web", {})
+                        if isinstance(web, dict):
+                            link = web.get("href", "")
+                    relevant.append({
+                        "player": name,
+                        "headline": headline,
+                        "description": description,
+                        "link": link
+                    })
+                    break
+
+        return relevant
+    except Exception as e:
+        logger.warning(f"Could not fetch news data: {str(e)}")
+        return []
+
+
+def build_news_notes(news_items):
+    """Format news items into short text notes for the AI prompt."""
+    notes = []
+    for item in news_items:
+        text = f"{item['player']}: {item['headline']}"
+        if item.get("description"):
+            text += f" - {item['description']}"
+        notes.append(text)
+    return notes
