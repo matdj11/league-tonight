@@ -15,7 +15,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 from database import init_db, db_session, League, Recap, Briefing, User, Roster, Matchup
-from sleeper_client import SleeperClient, build_bye_conflicts_from_team_map
+from sleeper_client import SleeperClient, build_bye_conflicts_from_team_map, _normalize_name
 from espn_data import get_weather_by_team, build_weather_notes, get_relevant_news, build_news_notes
 from fantasypros_data import get_projected_points_for_names, build_projection_notes, get_current_nfl_week
 from claude_helper import generate_recap, generate_draft_recap, generate_briefing, generate_season_preview, ai_resolve_team_for_names, generate_lineup_suggestion, generate_matchup_preview, ai_resolve_player_info_for_names
@@ -730,7 +730,9 @@ def get_full_roster():
 
         ai_info_by_name = {}
         if unresolved_for_ai:
-            ai_info_by_name = ai_resolve_player_info_for_names(unresolved_for_ai)
+            raw_ai_info = ai_resolve_player_info_for_names(unresolved_for_ai)
+            for k, v in raw_ai_info.items():
+                ai_info_by_name[_normalize_name(k)] = v
 
         results = []
         for name in player_names:
@@ -739,10 +741,11 @@ def get_full_roster():
             position = info.get('position') if info else None
             injury_status = info.get('injury_status') if info else None
 
-            if (not team or not position) and name in ai_info_by_name:
-                ai_info = ai_info_by_name[name]
-                team = team or ai_info.get('team')
-                position = position or ai_info.get('position')
+            if not team or not position:
+                ai_info = ai_info_by_name.get(_normalize_name(name))
+                if ai_info:
+                    team = team or ai_info.get('team')
+                    position = position or ai_info.get('position')
 
             projected_points = projections.get(name)
 
@@ -782,6 +785,37 @@ def debug_fantasypros():
         data = get_weekly_projections()
         return jsonify({"status": "ok", "raw_response": data})
     except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route('/api/debug/roster-resolve', methods=['GET'])
+def debug_roster_resolve():
+    try:
+        league_id = request.args.get('league_id')
+        team_id = request.args.get('team_id')
+        roster = db_session.query(Roster).filter_by(league_id=league_id, team_id=team_id).first()
+        if not roster:
+            return jsonify({"status": "error", "error": "roster not found"}), 404
+
+        player_names = roster.players or []
+        sleeper_results = {}
+        unresolved = []
+        for name in player_names:
+            info = sleeper.resolve_player_info_for_name(name)
+            sleeper_results[name] = info
+            if not info or not info.get('team') or not info.get('position'):
+                unresolved.append(name)
+
+        ai_raw = ai_resolve_player_info_for_names(unresolved) if unresolved else {}
+
+        return jsonify({
+            "status": "ok",
+            "player_names": player_names,
+            "sleeper_results": sleeper_results,
+            "unresolved_sent_to_ai": unresolved,
+            "ai_raw_response": ai_raw
+        })
+    except Exception as e:
+        logger.error(f"Debug roster resolve failed: {str(e)}")
         return jsonify({"status": "error", "error": str(e)}), 500
 
 @app.route('/api/stakes', methods=['GET'])
