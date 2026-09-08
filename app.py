@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 from database import init_db, db_session, League, Recap, Briefing, User, Roster
 from sleeper_client import SleeperClient
-from claude_helper import generate_recap, generate_draft_recap, generate_briefing
+from claude_helper import generate_recap, generate_draft_recap, generate_briefing, generate_season_preview
 
 sleeper = SleeperClient()
 
@@ -458,6 +458,100 @@ def generate_briefing_endpoint():
         logger.error(f"Briefing generation failed: {str(e)}")
         return jsonify({"status": "error", "error": str(e)}), 500
 
+@app.route('/api/season-preview/generate', methods=['POST', 'GET'])
+def generate_season_preview_endpoint():
+    try:
+        league_id = request.args.get('league_id')
+        if not league_id:
+            return jsonify({"status": "error", "error": "league_id required"}), 400
+
+        preview_data = generate_season_preview(league_id)
+
+        return jsonify({
+            "status": "generated",
+            "league_id": league_id,
+            "preview": preview_data
+        })
+    except Exception as e:
+        logger.error(f"Season preview generation failed: {str(e)}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route('/api/stakes', methods=['GET'])
+def get_stakes():
+    try:
+        league_id = request.args.get('league_id')
+        if not league_id:
+            return jsonify({"status": "error", "error": "league_id required"}), 400
+
+        league = db_session.query(League).filter_by(league_id=league_id).first()
+        if not league:
+            return jsonify({"status": "error", "error": "league not found"}), 404
+
+        rosters = db_session.query(Roster).filter_by(league_id=league_id).all()
+
+        standings = sorted(
+            rosters,
+            key=lambda r: (-(r.wins or 0), (r.losses or 0), -(r.points_for or 0))
+        )
+
+        num_teams = len(standings)
+        results = []
+        for idx, r in enumerate(standings):
+            place = idx + 1
+            payout = 0.0
+            if place == 1:
+                payout = league.first_place_amount or 0
+            elif place == 2:
+                payout = league.second_place_amount or 0
+            elif place == 3:
+                payout = league.third_place_amount or 0
+
+            punishment_watch = place > num_teams - 2 if num_teams > 2 else False
+
+            results.append({
+                "place": place,
+                "team_name": r.team_name,
+                "wins": r.wins or 0,
+                "losses": r.losses or 0,
+                "points_for": r.points_for or 0,
+                "payout": payout,
+                "punishment_watch": punishment_watch
+            })
+
+        return jsonify({
+            "status": "ok",
+            "league_id": league_id,
+            "prize_pool": league.prize_pool or 0,
+            "first_place_amount": league.first_place_amount or 0,
+            "second_place_amount": league.second_place_amount or 0,
+            "third_place_amount": league.third_place_amount or 0,
+            "standings": results
+        })
+    except Exception as e:
+        logger.error(f"Get stakes failed: {str(e)}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route('/api/recaps/list', methods=['GET'])
+def list_recaps():
+    try:
+        league_id = request.args.get('league_id')
+        if not league_id:
+            return jsonify({"status": "error", "error": "league_id required"}), 400
+
+        recaps = db_session.query(Recap).filter_by(
+            league_id=league_id, status='published'
+        ).order_by(Recap.created_at.desc()).all()
+
+        results = [
+            {"week": r.week, "created_at": r.created_at.isoformat() if r.created_at else None}
+            for r in recaps
+        ]
+
+        return jsonify({"status": "ok", "league_id": league_id, "recaps": results})
+    except Exception as e:
+        logger.error(f"List recaps failed: {str(e)}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
 @app.route('/team-home')
 def team_home():
     try:
@@ -473,7 +567,7 @@ def team_home():
         if not league or not roster:
             return "League or team not found", 404
 
-        return f"<div style='font-family:sans-serif;background:#0B0F17;color:#F5F3EE;padding:40px;'><h1>{roster.team_name}</h1><p>{league.name}</p><p>Team home page coming in Phase 3 (tabs: Home / Briefing / Recaps / Stakes).</p></div>"
+        return render_template('team_home.html', league=league, roster=roster)
     except Exception as e:
         logger.error(f"Team home error: {str(e)}")
         return f"Error: {str(e)}", 500
