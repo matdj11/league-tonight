@@ -611,6 +611,15 @@ def get_full_roster():
         logger.error(f"Get full roster failed: {str(e)}")
         return jsonify({"status": "error", "error": str(e)}), 500
 
+@app.route('/api/debug/fantasypros', methods=['GET'])
+def debug_fantasypros():
+    try:
+        from fantasypros_data import get_weekly_projections
+        data = get_weekly_projections()
+        return jsonify({"status": "ok", "raw_response": data})
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
 @app.route('/api/stakes', methods=['GET'])
 def get_stakes():
     try:
