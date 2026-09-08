@@ -5,29 +5,30 @@
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0B0F17; color: #F5F3EE; padding: 40px 20px; }
-        .container { max-width: 700px; margin: 0 auto; }
+        .container { max-width: 800px; margin: 0 auto; }
         h1 { font-size: 26px; margin-bottom: 8px; }
         .subtitle { color: #8B93A7; margin-bottom: 30px; font-size: 14px; }
         .card { background: #151B29; border: 1px solid #2A3245; border-radius: 12px; padding: 24px; margin-bottom: 20px; }
         label { display: block; font-size: 12px; color: #8B93A7; margin-bottom: 6px; margin-top: 14px; }
         label:first-child { margin-top: 0; }
-        input { width: 100%; padding: 10px 12px; background: #0B0F17; border: 1px solid #2A3245; border-radius: 6px; color: #F5F3EE; font-size: 14px; }
-        input:focus { outline: none; border-color: #FFB020; }
-        .team-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr; gap: 10px; margin-bottom: 12px; align-items: end; }
-        .team-row label { margin-top: 0; }
+        input, textarea { width: 100%; padding: 10px 12px; background: #0B0F17; border: 1px solid #2A3245; border-radius: 6px; color: #F5F3EE; font-size: 14px; font-family: inherit; }
+        input:focus, textarea:focus { outline: none; border-color: #FFB020; }
+        .team-block { border: 1px solid #2A3245; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+        .team-top-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+        .col-label { font-size: 11px; color: #8B93A7; margin-bottom: 4px; }
         .btn { display: inline-block; background: #FFB020; color: #3A2600; padding: 12px 24px; border-radius: 8px; font-weight: 700; font-size: 14px; border: none; cursor: pointer; margin-top: 10px; }
         .btn:hover { background: #E6A018; }
         .btn.secondary { background: transparent; border: 1px solid #2A3245; color: #F5F3EE; }
         .status { margin-top: 16px; font-size: 13px; min-height: 20px; }
         .status.success { color: #5EEAD4; }
         .status.error { color: #FF6B5E; }
-        .col-label { font-size: 11px; color: #8B93A7; margin-bottom: 4px; }
+        .roster-hint { font-size: 11px; color: #8B93A7; margin-top: 4px; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Manual League Setup (ESPN)</h1>
-        <p class="subtitle">Enter your league info once. You can update scores weekly from your ESPN export.</p>
+        <p class="subtitle">Enter your league info once. You can update scores and rosters weekly.</p>
 
         <div class="card">
             <label>League Name</label>
@@ -36,18 +37,10 @@
             <input type="text" id="league_id" placeholder="e.g. espn-mylegue-2026" />
         </div>
 
-        <div class="card">
-            <div style="display:grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr; gap:10px; margin-bottom: 6px;">
-                <div class="col-label">Team Name</div>
-                <div class="col-label">Wins</div>
-                <div class="col-label">Losses</div>
-                <div class="col-label">Pts For</div>
-                <div class="col-label">Pts Against</div>
-            </div>
-            <div id="teams_container"></div>
-            <button class="btn secondary" onclick="addTeamRow()">+ Add Team</button>
-        </div>
+        <div id="teams_container"></div>
+        <button class="btn secondary" onclick="addTeamRow()">+ Add Team</button>
 
+        <br>
         <button class="btn" id="submit_btn" onclick="submitLeague()">Save League</button>
         <div class="status" id="status"></div>
     </div>
@@ -58,16 +51,36 @@
         function addTeamRow() {
             teamCount++;
             const container = document.getElementById('teams_container');
-            const row = document.createElement('div');
-            row.className = 'team-row';
-            row.innerHTML = `
-                <input type="text" class="team_name" placeholder="Team ${teamCount}" />
-                <input type="number" class="team_wins" placeholder="0" value="0" />
-                <input type="number" class="team_losses" placeholder="0" value="0" />
-                <input type="number" class="team_pf" placeholder="0" value="0" step="0.1" />
-                <input type="number" class="team_pa" placeholder="0" value="0" step="0.1" />
+            const block = document.createElement('div');
+            block.className = 'team-block card';
+            block.innerHTML = `
+                <div class="team-top-row">
+                    <div>
+                        <div class="col-label">Team Name</div>
+                        <input type="text" class="team_name" placeholder="Team ${teamCount}" />
+                    </div>
+                    <div>
+                        <div class="col-label">Wins</div>
+                        <input type="number" class="team_wins" value="0" />
+                    </div>
+                    <div>
+                        <div class="col-label">Losses</div>
+                        <input type="number" class="team_losses" value="0" />
+                    </div>
+                    <div>
+                        <div class="col-label">Pts For</div>
+                        <input type="number" class="team_pf" value="0" step="0.1" />
+                    </div>
+                    <div>
+                        <div class="col-label">Pts Against</div>
+                        <input type="number" class="team_pa" value="0" step="0.1" />
+                    </div>
+                </div>
+                <div class="col-label">Roster (comma-separated player names)</div>
+                <textarea class="team_players" rows="2" placeholder="e.g. Christian McCaffrey, Justin Jefferson, Josh Allen, ..."></textarea>
+                <div class="roster-hint">Just paste names from your ESPN roster page, separated by commas.</div>
             `;
-            container.appendChild(row);
+            container.appendChild(block);
         }
 
         for (let i = 0; i < 10; i++) addTeamRow();
@@ -84,17 +97,18 @@
                 return;
             }
 
-            const rows = document.querySelectorAll('.team-row');
+            const blocks = document.querySelectorAll('.team-block');
             const teams = [];
-            rows.forEach(row => {
-                const name = row.querySelector('.team_name').value.trim();
+            blocks.forEach(block => {
+                const name = block.querySelector('.team_name').value.trim();
                 if (name) {
                     teams.push({
                         team_name: name,
-                        wins: parseInt(row.querySelector('.team_wins').value) || 0,
-                        losses: parseInt(row.querySelector('.team_losses').value) || 0,
-                        points_for: parseFloat(row.querySelector('.team_pf').value) || 0,
-                        points_against: parseFloat(row.querySelector('.team_pa').value) || 0
+                        wins: parseInt(block.querySelector('.team_wins').value) || 0,
+                        losses: parseInt(block.querySelector('.team_losses').value) || 0,
+                        points_for: parseFloat(block.querySelector('.team_pf').value) || 0,
+                        points_against: parseFloat(block.querySelector('.team_pa').value) || 0,
+                        players: block.querySelector('.team_players').value.trim()
                     });
                 }
             });
