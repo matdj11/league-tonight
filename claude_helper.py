@@ -49,7 +49,10 @@ CONFIRMED BYE WEEK CONFLICTS (computed from real 2026 NFL schedule, not a guess)
 CONFIRMED WEATHER FOR THIS WEEK'S GAMES (real data, only present when weather is actually a relevant factor - if empty, weather is not a concern for anyone on this roster and should not be mentioned at all):
 {weather_notes}
 
-Give this manager 3 short, personalized insights about their team. Base insights on roster construction, depth at each position, and the confirmed weather above where it applies. Keep it useful and specific-sounding, not generic filler. Only mention weather if it appears in the confirmed list above - never guess or invent weather conditions.
+RECENT NEWS RELEVANT TO THIS ROSTER (real headlines pulled live, only present when a player on this roster is actually mentioned - if empty, there is no relevant news right now):
+{news_notes}
+
+Give this manager 3 short, personalized insights about their team, prioritizing any real news above (injuries, roster moves, etc.) first if present, then roster construction, depth at each position, and confirmed weather where it applies. Keep it useful and specific-sounding, not generic filler. Only mention weather or news if they appear in the confirmed sections above - never guess or invent either.
 
 For the lineup_warning field: if there are confirmed bye week conflicts listed above, state them directly and specifically (name the players and the week). If there are none, set lineup_warning to null. Do NOT guess at or invent bye week conflicts that are not in the confirmed list above.
 
@@ -174,7 +177,7 @@ def generate_draft_recap(league_id, draft_picks_text, league_name):
         logger.error(f"Error generating draft recap with Claude: {str(e)}")
         return f"<h2>Draft recap generation failed</h2><p>Error: {str(e)}</p>"
 
-def generate_briefing(league_id, team_id, bye_conflicts=None, weather_notes=None):
+def generate_briefing(league_id, team_id, bye_conflicts=None, weather_notes=None, news_notes=None):
     try:
         client = anthropic.Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
 
@@ -189,13 +192,15 @@ def generate_briefing(league_id, team_id, bye_conflicts=None, weather_notes=None
 
         bye_conflicts_text = chr(10).join(bye_conflicts) if bye_conflicts else "None found."
         weather_notes_text = chr(10).join(weather_notes) if weather_notes else "None found."
+        news_notes_text = chr(10).join(news_notes) if news_notes else "None found."
 
         prompt = BRIEFING_PROMPT.format(
             league_name=league.name if league else "your league",
             team_name=roster.team_name,
             roster_players=roster_players,
             bye_conflicts=bye_conflicts_text,
-            weather_notes=weather_notes_text
+            weather_notes=weather_notes_text,
+            news_notes=news_notes_text
         )
 
         message = client.messages.create(
@@ -244,24 +249,29 @@ Full roster: {roster_players}
 CONFIRMED WEATHER FOR THIS WEEK'S GAMES (real data, only present when weather is actually a relevant factor - if empty, weather is not a concern and should not affect your reasoning):
 {weather_notes}
 
+RECENT NEWS RELEVANT TO THIS ROSTER (real headlines pulled live, only present when a player on this roster is actually mentioned - if empty, there is no relevant news right now):
+{news_notes}
+
 Assume a standard lineup: 1 QB, 2 RB, 2 WR, 1 TE, 1 FLEX (RB/WR/TE), 1 DST, 1 K. If the roster doesn't clearly contain enough players for a slot, leave that slot's player as null.
 
-Pick the strongest starters from the roster for each slot based on your knowledge of these players. Factor in confirmed weather above where relevant (e.g. bad weather can hurt passing games and favor run-heavy game plans). Never invent weather that isn't in the confirmed list. Briefly explain your FLEX choice.
+Pick the strongest starters from the roster for each slot based on your knowledge of these players. Factor in confirmed weather and news above where relevant (e.g. if news says a player is out or a backup is now starting, that should change your pick; bad weather can hurt passing games and favor run-heavy game plans). Never invent weather or news that isn't in the confirmed lists.
+
+For each slot, write a short one-sentence "reason" explaining the pick. If there's another player on the roster at the same position who could have started instead (a bench option at that position), explicitly compare the two and explain why you chose the starter over them, referencing any confirmed news/weather/matchup reasoning. If there's no real alternative at that position, just explain why the starter is a solid play.
 
 Respond ONLY as a JSON object in this exact shape, no other text:
 {{
   "lineup": [
-    {{"slot": "QB", "player": "player name or null"}},
-    {{"slot": "RB", "player": "player name or null"}},
-    {{"slot": "RB", "player": "player name or null"}},
-    {{"slot": "WR", "player": "player name or null"}},
-    {{"slot": "WR", "player": "player name or null"}},
-    {{"slot": "TE", "player": "player name or null"}},
-    {{"slot": "FLEX", "player": "player name or null"}},
-    {{"slot": "DST", "player": "player name or null"}},
-    {{"slot": "K", "player": "player name or null"}}
+    {{"slot": "QB", "player": "player name or null", "reason": "short sentence, compares to bench option if one exists at this position"}},
+    {{"slot": "RB", "player": "player name or null", "reason": "short sentence"}},
+    {{"slot": "RB", "player": "player name or null", "reason": "short sentence"}},
+    {{"slot": "WR", "player": "player name or null", "reason": "short sentence"}},
+    {{"slot": "WR", "player": "player name or null", "reason": "short sentence"}},
+    {{"slot": "TE", "player": "player name or null", "reason": "short sentence"}},
+    {{"slot": "FLEX", "player": "player name or null", "reason": "short sentence"}},
+    {{"slot": "DST", "player": "player name or null", "reason": "short sentence"}},
+    {{"slot": "K", "player": "player name or null", "reason": "short sentence"}}
   ],
-  "flex_reasoning": "one short sentence on why that FLEX pick"
+  "flex_reasoning": "one short sentence on why that FLEX pick over other flex-eligible bench players"
 }}"""
 
 def ai_resolve_team_for_names(names):
@@ -290,7 +300,7 @@ def ai_resolve_team_for_names(names):
         logger.warning(f"AI team resolution failed: {str(e)}")
         return {}
 
-def generate_lineup_suggestion(league_id, team_id, weather_notes=None):
+def generate_lineup_suggestion(league_id, team_id, weather_notes=None, news_notes=None):
     try:
         client = anthropic.Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
 
@@ -300,11 +310,13 @@ def generate_lineup_suggestion(league_id, team_id, weather_notes=None):
 
         roster_players = ", ".join(roster.players)
         weather_notes_text = chr(10).join(weather_notes) if weather_notes else "None found."
+        news_notes_text = chr(10).join(news_notes) if news_notes else "None found."
 
         prompt = LINEUP_PROMPT.format(
             team_name=roster.team_name,
             roster_players=roster_players,
-            weather_notes=weather_notes_text
+            weather_notes=weather_notes_text,
+            news_notes=news_notes_text
         )
 
         message = client.messages.create(
