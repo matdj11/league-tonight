@@ -364,26 +364,32 @@ def generate_lineup_suggestion(league_id, team_id, weather_notes=None, news_note
         logger.error(f"Error generating lineup suggestion with Claude: {str(e)}")
         return {"error": str(e)}
 
-MATCHUP_PROMPT = """You are a fantasy football analyst previewing a head-to-head matchup.
+MATCHUP_PROMPT = """You are a fantasy football analyst previewing a head-to-head matchup for a fantasy manager.
 
-Team A: {team_a_name}
-Team A roster: {team_a_players}
+Your team: {team_a_name}
+Your roster: {team_a_players}
 
-Team B (opponent): {team_b_name}
-Team B roster: {team_b_players}
+Your opponent: {team_b_name}
+Their roster: {team_b_players}
 
-Compare the two rosters and give:
-1. "strengths": 1-2 short points on where Team A has the advantage over Team B
-2. "weaknesses": 1-2 short points on where Team A is at a disadvantage against Team B
-3. "outlook": one short overall projected outlook sentence for Team A this matchup
+Speak directly to the manager as "you" and refer to the opponent by name or as "your opponent". Give:
+
+1. "game_outlook": one short phrase giving the overall verdict, like "You're expected to win comfortably", "This is a close matchup", "Your opponent is favored", or similar - pick whichever tone actually fits based on the roster comparison.
+
+2. "strengths": 1-2 short points on where you have the advantage over your opponent.
+
+3. "weaknesses": 1-2 short points on where you're at a disadvantage against your opponent.
+
+4. "players_to_watch": 1-3 short items naming specific players (yours or your opponent's) worth keeping an eye on this week and why - could be a breakout threat, a matchup advantage, or someone whose performance could swing the result.
 
 Base this on roster construction, depth, and your knowledge of the players. Keep it fun but grounded, like a sports analyst breaking down the matchup.
 
 Respond ONLY as a JSON object in this exact shape, no other text:
 {{
+  "game_outlook": "short verdict phrase",
   "strengths": [{{"text": "short point"}}],
   "weaknesses": [{{"text": "short point"}}],
-  "outlook": "one short sentence"
+  "players_to_watch": [{{"text": "short point naming a player and why"}}]
 }}"""
 
 def generate_matchup_preview(team_a_name, team_a_players, team_b_name, team_b_players):
@@ -408,7 +414,7 @@ def generate_matchup_preview(team_a_name, team_a_players, team_b_name, team_b_pl
         raw_text = _extract_text(message)
 
         def _matchup_fallback(text):
-            return {"strengths": [], "weaknesses": [], "outlook": "Matchup preview couldn't be parsed this time."}
+            return {"game_outlook": "Matchup preview couldn't be parsed this time.", "strengths": [], "weaknesses": [], "players_to_watch": []}
 
         matchup_data = _parse_json_safely(raw_text, _matchup_fallback)
         logger.info(f"Generated Claude matchup preview: {team_a_name} vs {team_b_name}")
@@ -416,7 +422,7 @@ def generate_matchup_preview(team_a_name, team_a_players, team_b_name, team_b_pl
 
     except Exception as e:
         logger.error(f"Error generating matchup preview with Claude: {str(e)}")
-        return {"strengths": [], "weaknesses": [], "outlook": f"Failed: {str(e)}"}
+        return {"game_outlook": f"Failed: {str(e)}", "strengths": [], "weaknesses": [], "players_to_watch": []}
 
 def generate_season_preview(league_id):
     try:
