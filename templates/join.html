@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Join Your League</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0B0F17; color: #F5F3EE; padding: 60px 20px; }
+        .container { max-width: 480px; margin: 0 auto; }
+        .eyebrow { color: #5EEAD4; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 12px; text-align: center; }
+        h1 { font-size: 28px; font-weight: 800; margin-bottom: 30px; text-align: center; }
+        .card { background: #151B29; border: 1px solid #2A3245; border-radius: 12px; padding: 24px; margin-bottom: 16px; }
+        label { display: block; font-size: 12px; color: #8B93A7; margin-bottom: 8px; }
+        input { width: 100%; padding: 12px 14px; background: #0B0F17; border: 1px solid #2A3245; border-radius: 8px; color: #F5F3EE; font-size: 16px; letter-spacing: 0.1em; text-align: center; }
+        input:focus { outline: none; border-color: #5EEAD4; }
+        .btn { width: 100%; background: #FFB020; color: #3A2600; padding: 14px; border-radius: 8px; font-weight: 700; font-size: 14px; border: none; cursor: pointer; margin-top: 16px; }
+        .btn:hover { background: #E6A018; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .status { margin-top: 14px; font-size: 13px; min-height: 18px; text-align: center; }
+        .status.error { color: #FF6B5E; }
+        .status.success { color: #5EEAD4; }
+        .team-list { margin-top: 10px; }
+        .team-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; border: 1px solid #2A3245; border-radius: 8px; margin-bottom: 8px; cursor: pointer; }
+        .team-item:hover { border-color: #FFB020; }
+        .team-item.claimed { opacity: 0.4; cursor: not-allowed; }
+        .team-item span.badge { font-size: 10px; color: #8B93A7; }
+        .pin-setup { display: none; }
+        .pin-setup.visible { display: block; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="eyebrow">Step 1</div>
+        <h1>Join Your League</h1>
+
+        <div class="card" id="pin_entry_card">
+            <label>League PIN</label>
+            <input type="text" id="league_pin" placeholder="6-digit PIN" maxlength="6" />
+            <button class="btn" id="find_btn" onclick="findLeague()">Find My League</button>
+            <div class="status" id="find_status"></div>
+        </div>
+
+        <div class="card" id="team_select_card" style="display:none;">
+            <label id="team_select_label">Pick your team</label>
+            <div class="team-list" id="team_list"></div>
+        </div>
+
+        <div class="card pin-setup" id="pin_setup_card">
+            <label id="pin_setup_label">Set a 4-digit PIN for quick sign-in</label>
+            <input type="text" id="team_pin" placeholder="4-digit PIN" maxlength="4" />
+            <button class="btn" id="claim_btn" onclick="claimTeam()">Claim My Team</button>
+            <div class="status" id="claim_status"></div>
+        </div>
+    </div>
+
+    <script>
+        let currentLeagueId = null;
+        let selectedTeamId = null;
+
+        async function findLeague() {
+            const pin = document.getElementById('league_pin').value.trim();
+            const statusEl = document.getElementById('find_status');
+            const btn = document.getElementById('find_btn');
+
+            if (!pin) {
+                statusEl.textContent = 'Please enter your league PIN.';
+                statusEl.className = 'status error';
+                return;
+            }
+
+            btn.disabled = true;
+            statusEl.textContent = 'Looking up league...';
+            statusEl.className = 'status';
+
+            try {
+                const res = await fetch('/api/league/find-by-pin', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ league_pin: pin })
+                });
+                const data = await res.json();
+
+                if (data.status !== 'found') {
+                    throw new Error(data.error || 'League not found.');
+                }
+
+                currentLeagueId = data.league_id;
+                statusEl.textContent = '';
+
+                document.getElementById('team_select_label').textContent = `Pick your team in ${data.league_name}`;
+                const listEl = document.getElementById('team_list');
+                listEl.innerHTML = '';
+
+                data.teams.forEach(team => {
+                    const item = document.createElement('div');
+                    item.className = 'team-item' + (team.claimed ? ' claimed' : '');
+                    item.innerHTML = `<span>${team.team_name}</span><span class="badge">${team.claimed ? 'Already claimed' : 'Available'}</span>`;
+                    if (!team.claimed) {
+                        item.onclick = () => selectTeam(team.team_id, team.team_name);
+                    }
+                    listEl.appendChild(item);
+                });
+
+                document.getElementById('team_select_card').style.display = 'block';
+                document.getElementById('pin_entry_card').style.display = 'none';
+
+            } catch (err) {
+                statusEl.textContent = err.message;
+                statusEl.className = 'status error';
+                btn.disabled = false;
+            }
+        }
+
+        function selectTeam(teamId, teamName) {
+            selectedTeamId = teamId;
+            document.getElementById('pin_setup_label').textContent = `Set a 4-digit PIN for ${teamName}`;
+            document.getElementById('pin_setup_card').classList.add('visible');
+            document.getElementById('team_select_card').style.display = 'none';
+        }
+
+        async function claimTeam() {
+            const pin = document.getElementById('team_pin').value.trim();
+            const statusEl = document.getElementById('claim_status');
+            const btn = document.getElementById('claim_btn');
+
+            if (!pin || pin.length !== 4 || !/^\d{4}$/.test(pin)) {
+                statusEl.textContent = 'Please enter exactly 4 digits.';
+                statusEl.className = 'status error';
+                return;
+            }
+
+            btn.disabled = true;
+            statusEl.textContent = 'Claiming your team...';
+            statusEl.className = 'status';
+
+            try {
+                const res = await fetch('/api/team/claim-with-pin', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        league_id: currentLeagueId,
+                        team_id: selectedTeamId,
+                        team_pin: pin
+                    })
+                });
+                const data = await res.json();
+
+                if (data.status !== 'claimed') {
+                    throw new Error(data.error || 'Failed to claim team.');
+                }
+
+                statusEl.textContent = 'Team claimed! Redirecting...';
+                statusEl.className = 'status success';
+
+                setTimeout(() => {
+                    window.location.href = `/team-home?league_id=${encodeURIComponent(currentLeagueId)}&team_id=${encodeURIComponent(selectedTeamId)}`;
+                }, 1000);
+
+            } catch (err) {
+                statusEl.textContent = err.message;
+                statusEl.className = 'status error';
+                btn.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>
