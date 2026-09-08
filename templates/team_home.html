@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{{ roster.team_name }} - {{ league.name }}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0B0F17; color: #F5F3EE; padding: 30px 16px 60px; }
+        .container { max-width: 700px; margin: 0 auto; }
+        .header { margin-bottom: 20px; }
+        .header .eyebrow { color: #FFB020; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 6px; }
+        .header h1 { font-size: 24px; font-weight: 800; }
+        .tabs { display: flex; gap: 6px; margin-bottom: 24px; border-bottom: 1px solid #2A3245; overflow-x: auto; }
+        .tab-btn { background: none; border: none; color: #8B93A7; font-size: 13px; font-weight: 600; padding: 10px 14px; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
+        .tab-btn.active { color: #FFB020; border-bottom-color: #FFB020; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .card { background: #151B29; border: 1px solid #2A3245; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+        .card-tag { display: inline-block; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #FFB020; margin-bottom: 8px; }
+        .card h2 { font-size: 16px; font-weight: 600; line-height: 1.4; margin-bottom: 8px; }
+        .card p { color: #8B93A7; font-size: 14px; line-height: 1.6; }
+        .rank-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #2A3245; font-size: 14px; }
+        .rank-row:last-child { border-bottom: none; }
+        .rank-num { font-family: monospace; color: #8B93A7; width: 24px; }
+        .btn { display: inline-block; background: #FFB020; color: #3A2600; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-weight: 600; border: none; cursor: pointer; font-size: 13px; }
+        .btn:hover { background: #E6A018; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .loading { color: #8B93A7; font-size: 13px; padding: 20px 0; text-align: center; }
+        .insight { padding: 12px 0; border-bottom: 1px solid #2A3245; font-size: 13px; line-height: 1.5; }
+        .insight-source { font-family: monospace; font-size: 10px; color: #5EEAD4; margin-top: 6px; }
+        .flag-card { background: #1F5A50; border-radius: 12px; padding: 13px 14px; margin-top: 10px; border: 1px solid #2A3245; }
+        .flag-tag { font-family: monospace; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; color: #5EEAD4; margin-bottom: 6px; }
+        .stakes-header { background: #1F5A50; border-radius: 12px; padding: 20px; text-align: center; margin-bottom: 16px; }
+        .stakes-header .pool { font-size: 28px; font-weight: 800; color: #5EEAD4; }
+        .stakes-header .breakdown { font-size: 12px; color: #F5F3EE; margin-top: 8px; }
+        .standings-row { display: grid; grid-template-columns: 30px 1fr 70px 70px; align-items: center; padding: 10px 0; border-bottom: 1px solid #2A3245; font-size: 13px; }
+        .standings-row:last-child { border-bottom: none; }
+        .standings-row.punishment { color: #FF6B5E; }
+        .payout { color: #5EEAD4; font-weight: 600; }
+        .recap-item { padding: 12px 0; border-bottom: 1px solid #2A3245; display: flex; justify-content: space-between; align-items: center; }
+        .recap-item:last-child { border-bottom: none; }
+        .recap-item a { color: #5EEAD4; text-decoration: none; font-size: 13px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="eyebrow">{{ league.name }}</div>
+            <h1>{{ roster.team_name }}</h1>
+        </div>
+
+        <div class="tabs">
+            <button class="tab-btn active" onclick="showTab('home')">Home</button>
+            <button class="tab-btn" onclick="showTab('briefing')">Briefing</button>
+            <button class="tab-btn" onclick="showTab('recaps')">Recaps</button>
+            <button class="tab-btn" onclick="showTab('stakes')">Stakes</button>
+        </div>
+
+        <div id="tab-home" class="tab-content active">
+            <div id="home-loading" class="loading">Tap below to generate this season's preview</div>
+            <button class="btn" id="home-generate-btn" onclick="loadHome()">Generate Season Preview</button>
+            <div id="home-content"></div>
+        </div>
+
+        <div id="tab-briefing" class="tab-content">
+            <div id="briefing-loading" class="loading">Tap below to generate your briefing</div>
+            <button class="btn" id="briefing-generate-btn" onclick="loadBriefing()">Generate My Briefing</button>
+            <div id="briefing-content"></div>
+        </div>
+
+        <div id="tab-recaps" class="tab-content">
+            <div id="recaps-content" class="loading">Loading recaps...</div>
+        </div>
+
+        <div id="tab-stakes" class="tab-content">
+            <div id="stakes-content" class="loading">Loading stakes...</div>
+        </div>
+    </div>
+
+    <script>
+        const leagueId = "{{ league.league_id }}";
+        const teamId = "{{ roster.team_id }}";
+        const loadedTabs = {};
+
+        function showTab(name) {
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
+            document.querySelector(`.tab-btn[onclick="showTab('${name}')"]`).classList.add('active');
+            document.getElementById(`tab-${name}`).classList.add('active');
+
+            if (name === 'recaps' && !loadedTabs.recaps) {
+                loadRecaps();
+                loadedTabs.recaps = true;
+            }
+            if (name === 'stakes' && !loadedTabs.stakes) {
+                loadStakes();
+                loadedTabs.stakes = true;
+            }
+        }
+
+        async function loadHome() {
+            const btn = document.getElementById('home-generate-btn');
+            const loadingEl = document.getElementById('home-loading');
+            const contentEl = document.getElementById('home-content');
+            btn.disabled = true;
+            loadingEl.textContent = 'Generating season preview...';
+            contentEl.innerHTML = '';
+
+            try {
+                const res = await fetch(`/api/season-preview/generate?league_id=${leagueId}`);
+                const data = await res.json();
+                if (data.status !== 'generated') throw new Error(data.error || 'Failed to generate preview.');
+
+                const p = data.preview;
+                loadingEl.textContent = '';
+                btn.style.display = 'none';
+
+                let rankingsHtml = '';
+                (p.power_rankings || []).forEach(r => {
+                    rankingsHtml += `<div class="rank-row"><span class="rank-num">${r.rank}</span><span>${r.team}</span></div>`;
+                });
+
+                contentEl.innerHTML = `
+                    <div class="card">
+                        <div class="card-tag">Team to Beat</div>
+                        <h2>${p.team_to_beat || 'N/A'}</h2>
+                    </div>
+                    <div class="card">
+                        <div class="card-tag">Rebuild Watch</div>
+                        <h2>${p.rebuild_watch || 'N/A'}</h2>
+                    </div>
+                    <div class="card">
+                        <h2 style="margin-bottom:12px;">Power Rankings</h2>
+                        ${rankingsHtml || '<p>No rankings available.</p>'}
+                    </div>
+                    <div class="card">
+                        <div class="card-tag">🔥 Bold Prediction</div>
+                        <p>${p.bold_prediction || 'N/A'}</p>
+                    </div>
+                `;
+            } catch (err) {
+                loadingEl.textContent = err.message;
+                btn.disabled = false;
+            }
+        }
+
+        async function loadBriefing() {
+            const btn = document.getElementById('briefing-generate-btn');
+            const loadingEl = document.getElementById('briefing-loading');
+            const contentEl = document.getElementById('briefing-content');
+            btn.disabled = true;
+            loadingEl.textContent = 'Generating your briefing...';
+            contentEl.innerHTML = '';
+
+            try {
+                const res = await fetch(`/api/briefing/generate?league_id=${leagueId}&team_id=${teamId}`);
+                const data = await res.json();
+                if (data.status !== 'briefing generated') throw new Error(data.error || 'Failed to generate briefing.');
+
+                const b = data.briefing;
+                loadingEl.textContent = '';
+                btn.style.display = 'none';
+
+                let html = '';
+                (b.insights || []).forEach(i => {
+                    html += `<div class="insight">${i.text}<div class="insight-source">📋 ${i.source}</div></div>`;
+                });
+
+                if (b.lineup_warning) {
+                    html += `<div class="flag-card"><div class="flag-tag">Lineup Flag</div><div>${b.lineup_warning}</div></div>`;
+                }
+
+                contentEl.innerHTML = html || '<p style="color:#8B93A7;">No insights available.</p>';
+            } catch (err) {
+                loadingEl.textContent = err.message;
+                btn.disabled = false;
+            }
+        }
+
+        async function loadRecaps() {
+            const contentEl = document.getElementById('recaps-content');
+            try {
+                const res = await fetch(`/api/recaps/list?league_id=${leagueId}`);
+                const data = await res.json();
+                if (data.status !== 'ok') throw new Error(data.error || 'Failed to load recaps.');
+
+                if (!data.recaps || data.recaps.length === 0) {
+                    contentEl.innerHTML = '<div class="card"><p>No recaps published yet. Check back after Week 1!</p></div>';
+                    return;
+                }
+
+                let html = '<div class="card">';
+                data.recaps.forEach(r => {
+                    html += `<div class="recap-item"><span>Week ${r.week}</span><a href="/recap/${leagueId}/${r.week}">View →</a></div>`;
+                });
+                html += '</div>';
+                contentEl.innerHTML = html;
+            } catch (err) {
+                contentEl.innerHTML = `<p style="color:#FF6B5E;">${err.message}</p>`;
+            }
+        }
+
+        async function loadStakes() {
+            const contentEl = document.getElementById('stakes-content');
+            try {
+                const res = await fetch(`/api/stakes?league_id=${leagueId}`);
+                const data = await res.json();
+                if (data.status !== 'ok') throw new Error(data.error || 'Failed to load stakes.');
+
+                let html = `
+                    <div class="stakes-header">
+                        <div class="pool">$${data.prize_pool}</div>
+                        <div class="breakdown">1st: $${data.first_place_amount} · 2nd: $${data.second_place_amount} · 3rd: $${data.third_place_amount}</div>
+                    </div>
+                    <div class="card">
+                        <div class="standings-row" style="color:#8B93A7; font-size:11px; text-transform:uppercase;">
+                            <span>#</span><span>Team</span><span>Record</span><span>Payout</span>
+                        </div>
+                `;
+
+                data.standings.forEach(s => {
+                    const rowClass = s.punishment_watch ? 'standings-row punishment' : 'standings-row';
+                    const payoutText = s.payout > 0 ? `$${s.payout}` : (s.punishment_watch ? '⚠️' : '—');
+                    html += `<div class="${rowClass}"><span>${s.place}</span><span>${s.team_name}</span><span>${s.wins}-${s.losses}</span><span class="payout">${payoutText}</span></div>`;
+                });
+
+                html += '</div>';
+                contentEl.innerHTML = html;
+            } catch (err) {
+                contentEl.innerHTML = `<p style="color:#FF6B5E;">${err.message}</p>`;
+            }
+        }
+    </script>
+</body>
+</html>
