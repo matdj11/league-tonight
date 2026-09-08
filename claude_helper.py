@@ -321,7 +321,7 @@ def generate_lineup_suggestion(league_id, team_id, weather_notes=None, news_note
 
         message = client.messages.create(
             model="claude-sonnet-5",
-            max_tokens=1024,
+            max_tokens=2048,
             messages=[
                 {"role": "user", "content": prompt}
             ]
