@@ -23,6 +23,10 @@ sleeper = SleeperClient()
 def index():
     return render_template('index.html')
 
+@app.route('/manual-setup')
+def manual_setup_page():
+    return render_template('manual_setup.html')
+
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify({"status": "ok"})
@@ -71,6 +75,65 @@ def sync_league():
         })
     except Exception as e:
         logger.error(f"League sync failed: {str(e)}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route('/api/league/manual-setup', methods=['POST'])
+def manual_league_setup():
+    try:
+        data = request.get_json()
+        league_id = data.get('league_id')
+        league_name = data.get('league_name')
+        teams = data.get('teams', [])
+
+        if not league_id or not league_name:
+            return jsonify({"status": "error", "error": "league_id and league_name required"}), 400
+
+        if not teams:
+            return jsonify({"status": "error", "error": "at least one team required"}), 400
+
+        league = db_session.query(League).filter_by(league_id=league_id).first()
+        if not league:
+            league = League(
+                id=str(uuid.uuid4()),
+                league_id=league_id,
+                name=league_name,
+                platform='espn_manual',
+                settings={}
+            )
+            db_session.add(league)
+        else:
+            league.name = league_name
+        db_session.commit()
+
+        for idx, team in enumerate(teams):
+            team_id = str(idx + 1)
+            existing = db_session.query(Roster).filter_by(league_id=league_id, team_id=team_id).first()
+            if not existing:
+                new_roster = Roster(
+                    id=str(uuid.uuid4()),
+                    league_id=league_id,
+                    team_id=team_id,
+                    team_name=team.get('team_name'),
+                    owner_name=None,
+                    players=[],
+                    wins=team.get('wins', 0),
+                    losses=team.get('losses', 0),
+                    points_for=team.get('points_for', 0),
+                    points_against=team.get('points_against', 0)
+                )
+                db_session.add(new_roster)
+            else:
+                existing.team_name = team.get('team_name')
+                existing.wins = team.get('wins', 0)
+                existing.losses = team.get('losses', 0)
+                existing.points_for = team.get('points_for', 0)
+                existing.points_against = team.get('points_against', 0)
+
+        db_session.commit()
+
+        return jsonify({"status": "saved", "league_id": league_id, "teams": len(teams)})
+    except Exception as e:
+        logger.error(f"Manual league setup failed: {str(e)}")
         return jsonify({"status": "error", "error": str(e)}), 500
 
 @app.route('/api/recap/generate', methods=['POST', 'GET'])
