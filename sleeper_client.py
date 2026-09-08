@@ -98,7 +98,12 @@ class SleeperClient:
             team = info.get("team")
             if full_name and team:
                 key = _normalize_name(full_name)
-                index[key] = team
+                index[key] = {
+                    "team": team,
+                    "position": info.get("position"),
+                    "injury_status": info.get("injury_status"),
+                    "status": info.get("status")
+                }
 
         self._name_to_team_cache = index
         return index
@@ -107,9 +112,21 @@ class SleeperClient:
         try:
             index = self._build_name_to_team_index()
             key = _normalize_name(name)
-            return index.get(key)
+            entry = index.get(key)
+            return entry["team"] if entry else None
         except Exception as e:
             logger.warning(f"Could not resolve team for '{name}': {str(e)}")
+            return None
+
+    def resolve_player_info_for_name(self, name):
+        """Return {'team', 'position', 'injury_status', 'status'} for a
+        player name if found in Sleeper's real NFL player database, else None."""
+        try:
+            index = self._build_name_to_team_index()
+            key = _normalize_name(name)
+            return index.get(key)
+        except Exception as e:
+            logger.warning(f"Could not resolve player info for '{name}': {str(e)}")
             return None
 
     def resolve_teams_for_names(self, player_names):
