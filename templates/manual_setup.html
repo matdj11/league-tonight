@@ -15,6 +15,7 @@
         input:focus, textarea:focus { outline: none; border-color: #FFB020; }
         .team-block { border: 1px solid #2A3245; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
         .team-top-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+        .prize-row { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 10px; }
         .col-label { font-size: 11px; color: #8B93A7; margin-bottom: 4px; }
         .btn { display: inline-block; background: #FFB020; color: #3A2600; padding: 12px 24px; border-radius: 8px; font-weight: 700; font-size: 14px; border: none; cursor: pointer; margin-top: 10px; }
         .btn:hover { background: #E6A018; }
@@ -23,6 +24,9 @@
         .status.success { color: #5EEAD4; }
         .status.error { color: #FF6B5E; }
         .roster-hint { font-size: 11px; color: #8B93A7; margin-top: 4px; }
+        .pin-reveal { background: #1F5A50; border-radius: 12px; padding: 20px; text-align: center; margin-top: 16px; }
+        .pin-reveal .pin { font-size: 32px; font-weight: 800; letter-spacing: 0.2em; color: #5EEAD4; margin: 8px 0; }
+        .pin-reveal p { font-size: 13px; color: #F5F3EE; }
     </style>
 </head>
 <body>
@@ -37,12 +41,32 @@
             <input type="text" id="league_id" placeholder="e.g. espn-mylegue-2026" />
         </div>
 
+        <div class="card">
+            <label>Total Prize Pool ($)</label>
+            <input type="number" id="prize_pool" placeholder="0" step="1" />
+            <div class="prize-row" style="margin-top: 14px;">
+                <div>
+                    <div class="col-label">1st Place ($)</div>
+                    <input type="number" id="first_place" placeholder="0" step="1" />
+                </div>
+                <div>
+                    <div class="col-label">2nd Place ($)</div>
+                    <input type="number" id="second_place" placeholder="0" step="1" />
+                </div>
+                <div>
+                    <div class="col-label">3rd Place ($)</div>
+                    <input type="number" id="third_place" placeholder="0" step="1" />
+                </div>
+            </div>
+        </div>
+
         <div id="teams_container"></div>
         <button class="btn secondary" onclick="addTeamRow()">+ Add Team</button>
 
         <br>
         <button class="btn" id="submit_btn" onclick="submitLeague()">Save League</button>
         <div class="status" id="status"></div>
+        <div id="pin_reveal_container"></div>
     </div>
 
     <script>
@@ -90,6 +114,10 @@
             const btn = document.getElementById('submit_btn');
             const leagueName = document.getElementById('league_name').value.trim();
             const leagueId = document.getElementById('league_id').value.trim();
+            const prizePool = parseFloat(document.getElementById('prize_pool').value) || 0;
+            const firstPlace = parseFloat(document.getElementById('first_place').value) || 0;
+            const secondPlace = parseFloat(document.getElementById('second_place').value) || 0;
+            const thirdPlace = parseFloat(document.getElementById('third_place').value) || 0;
 
             if (!leagueName || !leagueId) {
                 statusEl.textContent = 'Please enter a league name and league ID.';
@@ -130,17 +158,31 @@
                     body: JSON.stringify({
                         league_id: leagueId,
                         league_name: leagueName,
-                        teams: teams
+                        teams: teams,
+                        prize_pool: prizePool,
+                        first_place_amount: firstPlace,
+                        second_place_amount: secondPlace,
+                        third_place_amount: thirdPlace
                     })
                 });
                 const data = await res.json();
 
                 if (data.status === 'saved') {
-                    statusEl.textContent = 'League saved! Redirecting to your dashboard...';
+                    statusEl.textContent = 'League saved!';
                     statusEl.className = 'status success';
+
+                    const pinContainer = document.getElementById('pin_reveal_container');
+                    pinContainer.innerHTML = `
+                        <div class="pin-reveal">
+                            <p>Share this League PIN with your league members so they can log in and claim their team:</p>
+                            <div class="pin">${data.league_pin}</div>
+                            <p>They'll go to the site, enter this PIN, then pick their team and set their own 4-digit PIN.</p>
+                        </div>
+                    `;
+
                     setTimeout(() => {
                         window.location.href = `/dashboard?league_id=${encodeURIComponent(leagueId)}`;
-                    }, 1200);
+                    }, 6000);
                 } else {
                     throw new Error(data.error || 'Failed to save league.');
                 }
