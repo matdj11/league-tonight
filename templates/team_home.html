@@ -86,6 +86,9 @@
         .badge-status { font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; }
         .badge-status-out { background: #4A1F1F; color: #FF6B5E; }
         .badge-status-warn { background: #4A3B1F; color: #FFB020; }
+        .badge-proj { background: #2A2438; color: #C4A7FF; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; }
+        .bubble { background: #1A2130; border: 1px solid #2A3245; border-radius: 10px; padding: 12px; margin-bottom: 8px; font-size: 13px; line-height: 1.5; }
+        .bubble:last-child { margin-bottom: 0; }
     </style>
 </head>
 <body>
@@ -154,8 +157,8 @@
                 loadedTabs.stakes = true;
             }
             if (name === 'briefing' && !loadedTabs.briefing) {
-    loadBriefing();
-    loadedTabs.briefing = true;
+                loadBriefing();
+                loadedTabs.briefing = true;
             }
         }
 
@@ -272,6 +275,7 @@
                     const noteId = `roster-note-${idx}`;
                     const posBadge = p.position ? `<span class="badge-pos">${p.position}</span>` : '';
                     const teamBadge = p.team ? `<span class="badge-team">${p.team}</span>` : '';
+                    const projBadge = (p.projected_points !== null && p.projected_points !== undefined) ? `<span class="badge-proj">${p.projected_points} pts</span>` : '';
                     let statusBadge = '';
                     if (p.injury_status) {
                         const statusClass = p.injury_status.toLowerCase() === 'out' ? 'badge-status-out' : 'badge-status-warn';
@@ -284,7 +288,7 @@
                             <div class="roster-player-row">
                                 <div class="roster-player-name">
                                     ${p.name}
-                                    ${posBadge}${teamBadge}${statusBadge}
+                                    ${posBadge}${teamBadge}${projBadge}${statusBadge}
                                 </div>
                                 <button class="info-btn" onclick="toggleReason('${noteId}')">ⓘ</button>
                             </div>
@@ -299,6 +303,19 @@
             } catch (err) {
                 contentEl.innerHTML = `<p style="color:#FF6B5E;">${err.message}</p>`;
             }
+        }
+
+        function renderBubbleSection(title, items, emptyText) {
+            let html = `<div class="card"><h2 style="margin-bottom:10px;">${title}</h2>`;
+            if (items && items.length > 0) {
+                items.slice(0, 2).forEach(i => {
+                    html += `<div class="bubble">${i.text}</div>`;
+                });
+            } else {
+                html += `<p style="color:#8B93A7; font-size:13px;">${emptyText}</p>`;
+            }
+            html += `</div>`;
+            return html;
         }
 
         async function loadBriefing() {
@@ -319,15 +336,15 @@
                 btn.style.display = 'none';
 
                 let html = '';
-                (b.insights || []).forEach(i => {
-                    html += `<div class="insight">${i.text}<div class="insight-source">📋 ${i.source}</div></div>`;
-                });
+                html += renderBubbleSection('Roster Analysis', b.roster_analysis, 'No roster insights available.');
+                html += renderBubbleSection('Weather', b.weather, 'No relevant weather this week.');
+                html += renderBubbleSection('News', b.news, 'No relevant news right now.');
 
                 if (b.lineup_warning) {
                     html += `<div class="flag-card"><div class="flag-tag">Lineup Flag</div><div>${b.lineup_warning}</div></div>`;
                 }
 
-                contentEl.innerHTML = html || '<p style="color:#8B93A7;">No insights available.</p>';
+                contentEl.innerHTML = html;
             } catch (err) {
                 loadingEl.textContent = err.message;
                 btn.disabled = false;
