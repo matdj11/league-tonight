@@ -108,6 +108,9 @@ def manual_league_setup():
         for idx, team in enumerate(teams):
             team_id = str(idx + 1)
             existing = db_session.query(Roster).filter_by(league_id=league_id, team_id=team_id).first()
+            players_raw = team.get('players', '')
+            players_list = [p.strip() for p in players_raw.split(',') if p.strip()] if isinstance(players_raw, str) else (players_raw or [])
+
             if not existing:
                 new_roster = Roster(
                     id=str(uuid.uuid4()),
@@ -115,7 +118,7 @@ def manual_league_setup():
                     team_id=team_id,
                     team_name=team.get('team_name'),
                     owner_name=None,
-                    players=[],
+                    players=players_list,
                     wins=team.get('wins', 0),
                     losses=team.get('losses', 0),
                     points_for=team.get('points_for', 0),
@@ -124,6 +127,7 @@ def manual_league_setup():
                 db_session.add(new_roster)
             else:
                 existing.team_name = team.get('team_name')
+                existing.players = players_list
                 existing.wins = team.get('wins', 0)
                 existing.losses = team.get('losses', 0)
                 existing.points_for = team.get('points_for', 0)
