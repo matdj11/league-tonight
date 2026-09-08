@@ -534,6 +534,71 @@ def generate_lineup_endpoint():
         logger.error(f"Lineup generation failed: {str(e)}")
         return jsonify({"status": "error", "error": str(e)}), 500
 
+@app.route('/api/roster/full', methods=['GET'])
+def get_full_roster():
+    try:
+        league_id = request.args.get('league_id')
+        team_id = request.args.get('team_id')
+
+        if not league_id or not team_id:
+            return jsonify({"status": "error", "error": "league_id and team_id required"}), 400
+
+        roster = db_session.query(Roster).filter_by(league_id=league_id, team_id=team_id).first()
+        if not roster:
+            return jsonify({"status": "error", "error": "roster not found"}), 404
+
+        player_names = roster.players or []
+
+        weather_by_team = get_weather_by_team()
+        news_items = get_relevant_news(player_names)
+        news_by_player = {item['player']: item for item in news_items}
+
+        bye_conflicts = []
+        players_out = []
+        try:
+            resolved, unresolved = sleeper.resolve_teams_for_names(player_names)
+            if unresolved:
+                ai_resolved = ai_resolve_team_for_names(unresolved)
+                resolved.update(ai_resolved)
+            bye_conflicts = build_bye_conflicts_from_team_map(resolved)
+        except Exception as e:
+            logger.warning(f"Bye lookup failed for roster view: {str(e)}")
+
+        results = []
+        for name in player_names:
+            info = sleeper.resolve_player_info_for_name(name)
+            team = info.get('team') if info else None
+            position = info.get('position') if info else None
+            injury_status = info.get('injury_status') if info else None
+
+            notes = []
+            if name in news_by_player:
+                item = news_by_player[name]
+                notes.append(f"{item['headline']}")
+            if team and team.upper() in weather_by_team:
+                notes.append(f"Weather: {weather_by_team[team.upper()]}")
+            for conflict in bye_conflicts:
+                if name in conflict:
+                    notes.append(conflict)
+
+            results.append({
+                "name": name,
+                "team": team,
+                "position": position,
+                "injury_status": injury_status,
+                "notes": notes
+            })
+
+        return jsonify({
+            "status": "ok",
+            "league_id": league_id,
+            "team_id": team_id,
+            "players": results
+        })
+    except Exception as e:
+        logger.error(f"Get full roster failed: {str(e)}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
 @app.route('/api/stakes', methods=['GET'])
 def get_stakes():
     try:
