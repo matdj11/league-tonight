@@ -59,6 +59,12 @@
             <div id="home-loading" class="loading">Tap below to generate this season's preview</div>
             <button class="btn" id="home-generate-btn" onclick="loadHome()">Generate Season Preview</button>
             <div id="home-content"></div>
+
+            <div style="margin-top: 24px;">
+                <div id="lineup-loading" class="loading">Tap below for your suggested starting lineup</div>
+                <button class="btn" id="lineup-generate-btn" onclick="loadLineup()">Generate Suggested Lineup</button>
+                <div id="lineup-content"></div>
+            </div>
         </div>
 
         <div id="tab-briefing" class="tab-content">
@@ -135,6 +141,41 @@
                     <div class="card">
                         <div class="card-tag">🔥 Bold Prediction</div>
                         <p>${p.bold_prediction || 'N/A'}</p>
+                    </div>
+                `;
+            } catch (err) {
+                loadingEl.textContent = err.message;
+                btn.disabled = false;
+            }
+        }
+
+        async function loadLineup() {
+            const btn = document.getElementById('lineup-generate-btn');
+            const loadingEl = document.getElementById('lineup-loading');
+            const contentEl = document.getElementById('lineup-content');
+            btn.disabled = true;
+            loadingEl.textContent = 'Setting your lineup...';
+            contentEl.innerHTML = '';
+
+            try {
+                const res = await fetch(`/api/lineup/generate?league_id=${leagueId}&team_id=${teamId}`);
+                const data = await res.json();
+                if (data.status !== 'generated') throw new Error(data.error || 'Failed to generate lineup.');
+
+                const l = data.lineup;
+                loadingEl.textContent = '';
+                btn.style.display = 'none';
+
+                let rows = '';
+                (l.lineup || []).forEach(slot => {
+                    rows += `<div class="rank-row"><span class="rank-num">${slot.slot}</span><span>${slot.player || 'TBD'}</span></div>`;
+                });
+
+                contentEl.innerHTML = `
+                    <div class="card">
+                        <h2 style="margin-bottom:12px;">Suggested Starting Lineup</h2>
+                        ${rows || '<p>No lineup available.</p>'}
+                        ${l.flex_reasoning ? `<p style="margin-top:10px;"><strong>FLEX pick:</strong> ${l.flex_reasoning}</p>` : ''}
                     </div>
                 `;
             } catch (err) {
