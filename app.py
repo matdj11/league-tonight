@@ -372,6 +372,37 @@ def generate_draft_recap_endpoint():
         logger.error(f"Draft recap generation failed: {str(e)}")
         return jsonify({"status": "error", "error": str(e)}), 500
 
+@app.route('/api/recap/draft-manual', methods=['POST'])
+def generate_manual_draft_recap_endpoint():
+    try:
+        data = request.get_json()
+        league_id = data.get('league_id')
+        draft_text = data.get('draft_text', '').strip()
+
+        if not league_id or not draft_text:
+            return jsonify({"status": "error", "error": "league_id and draft_text required"}), 400
+
+        league = db_session.query(League).filter_by(league_id=league_id).first()
+        if not league:
+            return jsonify({"status": "error", "error": "league not found"}), 404
+
+        recap_content = generate_draft_recap(league_id, draft_text, league.name)
+
+        recap = Recap(
+            id=str(uuid.uuid4()),
+            league_id=league_id,
+            week="draft",
+            content=recap_content,
+            status='draft'
+        )
+        db_session.add(recap)
+        db_session.commit()
+
+        return jsonify({"status": "draft recap generated", "league_id": league_id})
+    except Exception as e:
+        logger.error(f"Manual draft recap generation failed: {str(e)}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
 @app.route('/api/recap/publish', methods=['POST', 'GET'])
 def publish_recap():
     try:
