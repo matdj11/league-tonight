@@ -19,6 +19,8 @@
         .status.draft { background: #8A6318; color: #FFB020; }
         .status.published { background: #1F5A50; color: #5EEAD4; }
         .link { color: #5EEAD4; text-decoration: none; word-break: break-all; }
+        .link:hover { text-decoration: underline; }
+        textarea { width: 100%; min-height: 200px; padding: 12px; background: #0B0F17; border: 1px solid #2A3245; border-radius: 8px; color: #F5F3EE; font-size: 13px; font-family: monospace; margin-bottom: 12px; resize: vertical; }
         .msg { margin-top: 12px; font-size: 13px; color: #8B93A7; min-height: 18px; }
         .msg.success { color: #5EEAD4; }
         .msg.error { color: #FF6B5E; }
@@ -33,6 +35,7 @@
             <h2>League Information</h2>
             <p><strong>League ID:</strong> {{ league.league_id }}</p>
             <p><strong>Platform:</strong> {{ league.platform|upper }}</p>
+            <p><strong>Created:</strong> {{ league.created_at.strftime('%B %d, %Y') }}</p>
         </div>
 
         {% if latest_recap %}
@@ -40,66 +43,108 @@
             <h2>Latest Recap</h2>
             <p><strong>Week:</strong> {{ latest_recap.week }}</p>
             <p><strong>Status:</strong> <span class="status {{ latest_recap.status }}">{{ latest_recap.status|upper }}</span></p>
-            {% if latest_recap.status == 'published' %}
-            <p><a href="/recap/{{ league.league_id }}/{{ latest_recap.week }}" class="link">View Recap →</a></p>
-            {% endif %}
+            <p><strong>Generated:</strong> {{ latest_recap.created_at.strftime('%B %d, %Y at %I:%M %p') }}</p>
         </div>
         {% endif %}
 
         <div class="card">
+            <h2>Paste Your Draft Results</h2>
+            <p>Paste your full draft results below (any format works - round by round, pick by pick, doesn't matter). We'll generate a fun AI draft recap from it.</p>
+            <textarea id="draft_text" placeholder="Paste your draft results here..."></textarea>
+            <button class="btn" id="draft_btn" onclick="generateDraftRecap()">Generate Draft Recap</button>
+            <div class="msg" id="draft_msg"></div>
+        </div>
+
+        <div class="card">
             <h2>Generate This Week's Recap</h2>
-            <p>Generate, then publish to get a shareable link for your league.</p>
+            <p>Generate a recap from this week's matchups (requires synced league data).</p>
             <button class="btn" id="gen_btn" onclick="generateRecap()">Generate Recap</button>
-            <button class="btn" id="pub_btn" onclick="publishRecap()" style="margin-left: 8px;">Publish Latest</button>
-            <div class="msg" id="msg"></div>
+            <div class="msg" id="gen_msg"></div>
+        </div>
+
+        <div class="card">
+            <h2>Publish Recap</h2>
+            <p>Publish the latest recap (draft or weekly) to get a shareable link.</p>
+            <input type="text" id="publish_week" placeholder="Week (e.g. draft or 1)" style="width:100%; padding:10px; background:#0B0F17; border:1px solid #2A3245; border-radius:8px; color:#F5F3EE; margin-bottom:12px;" />
+            <button class="btn" id="pub_btn" onclick="publishRecap()">Publish</button>
+            <div class="msg" id="pub_msg"></div>
         </div>
     </div>
 
     <script>
         const leagueId = "{{ league.league_id }}";
 
+        async function generateDraftRecap() {
+            const btn = document.getElementById('draft_btn');
+            const msg = document.getElementById('draft_msg');
+            const text = document.getElementById('draft_text').value.trim();
+
+            if (!text) {
+                msg.textContent = 'Please paste your draft results first.';
+                msg.className = 'msg error';
+                return;
+            }
+
+            btn.disabled = true;
+            msg.textContent = 'Generating draft recap with Claude...';
+            msg.className = 'msg';
+
+            try {
+                const res = await fetch('/api/recap/draft-manual', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ league_id: leagueId, draft_text: text })
+                });
+                const data = await res.json();
+                if (data.status !== 'draft recap generated') throw new Error(data.error || 'Failed to generate.');
+
+                msg.textContent = 'Draft recap generated! Set the week field below to "draft" and click Publish to share it.';
+                msg.className = 'msg success';
+            } catch (err) {
+                msg.textContent = err.message;
+                msg.className = 'msg error';
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
         async function generateRecap() {
             const btn = document.getElementById('gen_btn');
-            const msg = document.getElementById('msg');
+            const msg = document.getElementById('gen_msg');
             btn.disabled = true;
-            msg.textContent = 'Generating recap with Claude...';
+            msg.textContent = 'Generating...';
             msg.className = 'msg';
             try {
                 const res = await fetch(`/api/recap/generate?league_id=${leagueId}&week=1`);
                 const data = await res.json();
-                if (data.status === 'recap generated') {
-                    msg.textContent = `Recap generated for week ${data.week}. Reloading...`;
-                    msg.className = 'msg success';
-                    setTimeout(() => window.location.reload(), 1200);
-                } else {
-                    throw new Error(data.error || 'Failed to generate recap.');
-                }
+                if (data.status !== 'recap generated') throw new Error(data.error || 'Failed to generate.');
+                msg.textContent = `Recap generated for week ${data.week}.`;
+                msg.className = 'msg success';
             } catch (err) {
                 msg.textContent = err.message;
                 msg.className = 'msg error';
+            } finally {
                 btn.disabled = false;
             }
         }
 
         async function publishRecap() {
             const btn = document.getElementById('pub_btn');
-            const msg = document.getElementById('msg');
+            const msg = document.getElementById('pub_msg');
+            const week = document.getElementById('publish_week').value.trim() || '1';
             btn.disabled = true;
             msg.textContent = 'Publishing...';
             msg.className = 'msg';
             try {
-                const res = await fetch(`/api/recap/publish?league_id=${leagueId}&week=1`);
+                const res = await fetch(`/api/recap/publish?league_id=${leagueId}&week=${week}`);
                 const data = await res.json();
-                if (data.status === 'published') {
-                    msg.textContent = `Published! Reloading...`;
-                    msg.className = 'msg success';
-                    setTimeout(() => window.location.reload(), 1200);
-                } else {
-                    throw new Error(data.error || 'Failed to publish recap.');
-                }
+                if (data.status !== 'published') throw new Error(data.error || 'Failed to publish.');
+                msg.innerHTML = `Published! Shareable link: <a href="${data.shareable_link}" class="link">${data.shareable_link}</a>`;
+                msg.className = 'msg success';
             } catch (err) {
                 msg.textContent = err.message;
                 msg.className = 'msg error';
+            } finally {
                 btn.disabled = false;
             }
         }
