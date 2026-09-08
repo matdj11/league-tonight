@@ -55,6 +55,29 @@ Respond ONLY as a JSON object in this exact shape, no other text:
   "lineup_warning": "one short sentence flagging something to double check, or null"
 }}"""
 
+SEASON_PREVIEW_PROMPT = """You are a sports analyst creating a season preview for a fantasy football league called "{league_name}" before games have started.
+
+Here are the teams and their rosters:
+
+{teams}
+
+Since no games have been played yet, create a season preview based on roster construction and projections instead of actual results. Include:
+1. Projected strongest team ("Team to Beat") with a short reason
+2. Projected weakest team ("Rebuild Watch") with a short reason, keep it light and funny not mean
+3. A power ranking of all teams 1 to N based on roster strength (your best judgment)
+4. One spicy AI "bold prediction" for the season
+
+Respond ONLY as a JSON object in this exact shape, no other text:
+{{
+  "team_to_beat": "short text naming a team and why",
+  "rebuild_watch": "short text naming a team and why, light and funny",
+  "power_rankings": [
+    {{"rank": 1, "team": "team name"}},
+    {{"rank": 2, "team": "team name"}}
+  ],
+  "bold_prediction": "one spicy prediction for the season"
+}}"""
+
 def _extract_text(message):
     text = None
     for block in message.content:
@@ -168,3 +191,50 @@ def generate_briefing(league_id, team_id):
     except Exception as e:
         logger.error(f"Error generating briefing with Claude: {str(e)}")
         return {"insights": [{"text": f"Briefing generation failed: {str(e)}", "source": "Error"}], "lineup_warning": None}
+
+def generate_season_preview(league_id):
+    try:
+        client = anthropic.Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
+
+        league = db_session.query(League).filter_by(league_id=league_id).first()
+        rosters = db_session.query(Roster).filter_by(league_id=league_id).all()
+
+        if not rosters:
+            return {"error": "No roster data yet"}
+
+        teams_text = chr(10).join([
+            f"{r.team_name}: {', '.join(r.players[:10]) if r.players else 'No players listed'}"
+            for r in rosters
+        ])
+
+        prompt = SEASON_PREVIEW_PROMPT.format(
+            league_name=league.name if league else "the league",
+            teams=teams_text
+        )
+
+        message = client.messages.create(
+            model="claude-sonnet-5",
+            max_tokens=1024,
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+
+        raw_text = _extract_text(message)
+
+        try:
+            preview_data = json.loads(raw_text)
+        except Exception:
+            preview_data = {
+                "team_to_beat": "",
+                "rebuild_watch": "",
+                "power_rankings": [],
+                "bold_prediction": raw_text
+            }
+
+        logger.info(f"Generated Claude season preview for league {league_id}")
+        return preview_data
+
+    except Exception as e:
+        logger.error(f"Error generating season preview with Claude: {str(e)}")
+        return {"error": str(e)}
