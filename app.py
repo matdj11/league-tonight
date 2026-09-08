@@ -18,9 +18,13 @@ from database import init_db, db_session, League, Recap, Briefing, User, Roster,
 from sleeper_client import SleeperClient, build_bye_conflicts_from_team_map
 from espn_data import get_weather_by_team, build_weather_notes, get_relevant_news, build_news_notes
 from fantasypros_data import get_projected_points_for_names, build_projection_notes, get_current_nfl_week
-from claude_helper import generate_recap, generate_draft_recap, generate_briefing, generate_season_preview, ai_resolve_team_for_names, generate_lineup_suggestion, generate_matchup_preview
+from claude_helper import generate_recap, generate_draft_recap, generate_briefing, generate_season_preview, ai_resolve_team_for_names, generate_lineup_suggestion, generate_matchup_preview, ai_resolve_player_info_for_names
 
 sleeper = SleeperClient()
+
+@app.teardown_appcontext
+def shutdown_session(exception=None):
+    db_session.remove()
 
 def generate_pin(length):
     return ''.join([str(random.randint(0, 9)) for _ in range(length)])
@@ -716,12 +720,30 @@ def get_full_roster():
         except Exception as e:
             logger.warning(f"Bye lookup failed for roster view: {str(e)}")
 
-        results = []
+        sleeper_info_by_name = {}
+        unresolved_for_ai = []
         for name in player_names:
             info = sleeper.resolve_player_info_for_name(name)
+            sleeper_info_by_name[name] = info
+            if not info or not info.get('team') or not info.get('position'):
+                unresolved_for_ai.append(name)
+
+        ai_info_by_name = {}
+        if unresolved_for_ai:
+            ai_info_by_name = ai_resolve_player_info_for_names(unresolved_for_ai)
+
+        results = []
+        for name in player_names:
+            info = sleeper_info_by_name.get(name)
             team = info.get('team') if info else None
             position = info.get('position') if info else None
             injury_status = info.get('injury_status') if info else None
+
+            if (not team or not position) and name in ai_info_by_name:
+                ai_info = ai_info_by_name[name]
+                team = team or ai_info.get('team')
+                position = position or ai_info.get('position')
+
             projected_points = projections.get(name)
 
             notes = []
