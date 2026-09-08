@@ -56,6 +56,35 @@ def test_sleeper():
         logger.error(f"Sleeper test failed: {str(e)}")
         return jsonify({"sleeper": "error", "error": str(e)}), 500
 
+@app.route('/api/migrate-db', methods=['GET', 'POST'])
+def migrate_database():
+    try:
+        from sqlalchemy import text
+        from database import engine
+
+        migrations = [
+            "ALTER TABLE leagues ADD COLUMN IF NOT EXISTS league_pin VARCHAR(6)",
+            "ALTER TABLE leagues ADD COLUMN IF NOT EXISTS prize_pool FLOAT DEFAULT 0.0",
+            "ALTER TABLE leagues ADD COLUMN IF NOT EXISTS first_place_amount FLOAT DEFAULT 0.0",
+            "ALTER TABLE leagues ADD COLUMN IF NOT EXISTS second_place_amount FLOAT DEFAULT 0.0",
+            "ALTER TABLE leagues ADD COLUMN IF NOT EXISTS third_place_amount FLOAT DEFAULT 0.0",
+            "ALTER TABLE leagues ADD COLUMN IF NOT EXISTS weather_api_key VARCHAR",
+            "ALTER TABLE rosters ADD COLUMN IF NOT EXISTS team_pin VARCHAR(4)",
+            "ALTER TABLE rosters ADD COLUMN IF NOT EXISTS claimed BOOLEAN DEFAULT FALSE",
+        ]
+
+        results = []
+        with engine.connect() as conn:
+            for stmt in migrations:
+                conn.execute(text(stmt))
+                conn.commit()
+                results.append(stmt)
+
+        return jsonify({"status": "migrated", "statements_run": len(results)})
+    except Exception as e:
+        logger.error(f"Migration failed: {str(e)}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
 @app.route('/api/init-db', methods=['GET', 'POST'])
 def init_database():
     try:
