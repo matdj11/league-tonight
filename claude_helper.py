@@ -405,7 +405,7 @@ def generate_matchup_preview(team_a_name, team_a_players, team_b_name, team_b_pl
 
         message = client.messages.create(
             model="claude-sonnet-5",
-            max_tokens=1024,
+            max_tokens=1536,
             messages=[
                 {"role": "user", "content": prompt}
             ]
