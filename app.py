@@ -1,684 +1,332 @@
-from flask import Flask, render_template, jsonify, request
-from flask_cors import CORS
-import os
-from dotenv import load_dotenv
-import logging
-import uuid
-import random
-
-load_dotenv()
-
-app = Flask(__name__, template_folder='templates')
-CORS(app)
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-from database import init_db, db_session, League, Recap, Briefing, User, Roster
-from sleeper_client import SleeperClient, build_bye_conflicts_from_team_map
-from espn_data import get_weather_by_team, build_weather_notes
-from claude_helper import generate_recap, generate_draft_recap, generate_briefing, generate_season_preview, ai_resolve_team_for_names, generate_lineup_suggestion
-
-sleeper = SleeperClient()
-
-def generate_pin(length):
-    return ''.join([str(random.randint(0, 9)) for _ in range(length)])
-
-@app.route('/')
-def index():
-    return render_template('index.html')
-
-@app.route('/manual-setup')
-def manual_setup_page():
-    return render_template('manual_setup.html')
-
-@app.route('/health', methods=['GET'])
-def health():
-    return jsonify({"status": "ok"})
-
-@app.route('/api/test-db', methods=['GET'])
-def test_db():
-    try:
-        leagues = db_session.query(League).first()
-        return jsonify({"database": "connected", "test": "ok"})
-    except Exception as e:
-        logger.error(f"DB test failed: {str(e)}")
-        return jsonify({"database": "error", "error": str(e)}), 500
-
-@app.route('/api/test-sleeper', methods=['GET'])
-def test_sleeper():
-    try:
-        league_id = os.getenv('SLEEPER_LEAGUE_ID')
-        if not league_id:
-            return jsonify({"sleeper": "not configured"}), 400
-        result = sleeper.get_league(league_id)
-        return jsonify({"sleeper": "connected", "league": result.get("name")})
-    except Exception as e:
-        logger.error(f"Sleeper test failed: {str(e)}")
-        return jsonify({"sleeper": "error", "error": str(e)}), 500
-
-@app.route('/api/migrate-db', methods=['GET', 'POST'])
-def migrate_database():
-    try:
-        from sqlalchemy import text
-        from database import engine
-
-        migrations = [
-            "ALTER TABLE leagues ADD COLUMN IF NOT EXISTS league_pin VARCHAR(6)",
-            "ALTER TABLE leagues ADD COLUMN IF NOT EXISTS prize_pool FLOAT DEFAULT 0.0",
-            "ALTER TABLE leagues ADD COLUMN IF NOT EXISTS first_place_amount FLOAT DEFAULT 0.0",
-            "ALTER TABLE leagues ADD COLUMN IF NOT EXISTS second_place_amount FLOAT DEFAULT 0.0",
-            "ALTER TABLE leagues ADD COLUMN IF NOT EXISTS third_place_amount FLOAT DEFAULT 0.0",
-            "ALTER TABLE leagues ADD COLUMN IF NOT EXISTS weather_api_key VARCHAR",
-            "ALTER TABLE rosters ADD COLUMN IF NOT EXISTS team_pin VARCHAR(4)",
-            "ALTER TABLE rosters ADD COLUMN IF NOT EXISTS claimed BOOLEAN DEFAULT FALSE",
-        ]
-
-        results = []
-        with engine.connect() as conn:
-            for stmt in migrations:
-                conn.execute(text(stmt))
-                conn.commit()
-                results.append(stmt)
-
-        return jsonify({"status": "migrated", "statements_run": len(results)})
-    except Exception as e:
-        logger.error(f"Migration failed: {str(e)}")
-        return jsonify({"status": "error", "error": str(e)}), 500
-
-@app.route('/api/init-db', methods=['GET', 'POST'])
-def init_database():
-    try:
-        init_db()
-        return jsonify({"status": "database initialized"})
-    except Exception as e:
-        logger.error(f"DB init failed: {str(e)}")
-        return jsonify({"status": "error", "error": str(e)}), 500
-
-@app.route('/api/league/sync', methods=['POST', 'GET'])
-def sync_league():
-    try:
-        league_id = request.args.get('league_id') or os.getenv('SLEEPER_LEAGUE_ID')
-        logger.info(f"Syncing Sleeper league {league_id}")
-        result = sleeper.sync_league(league_id)
-        return jsonify({
-            "status": "sync complete",
-            "league_id": league_id,
-            "platform": "sleeper",
-            "teams": result.get("rosters", 0)
-        })
-    except Exception as e:
-        logger.error(f"League sync failed: {str(e)}")
-        return jsonify({"status": "error", "error": str(e)}), 500
-
-@app.route('/api/league/manual-setup', methods=['POST'])
-def manual_league_setup():
-    try:
-        data = request.get_json()
-        league_id = data.get('league_id')
-        league_name = data.get('league_name')
-        teams = data.get('teams', [])
-        prize_pool = data.get('prize_pool', 0)
-        first_place_amount = data.get('first_place_amount', 0)
-        second_place_amount = data.get('second_place_amount', 0)
-        third_place_amount = data.get('third_place_amount', 0)
-
-        if not league_id or not league_name:
-            return jsonify({"status": "error", "error": "league_id and league_name required"}), 400
-
-        if not teams:
-            return jsonify({"status": "error", "error": "at least one team required"}), 400
-
-        league = db_session.query(League).filter_by(league_id=league_id).first()
-        is_new = False
-        if not league:
-            is_new = True
-            league = League(
-                id=str(uuid.uuid4()),
-                league_id=league_id,
-                name=league_name,
-                platform='espn_manual',
-                settings={},
-                league_pin=generate_pin(6),
-                prize_pool=prize_pool,
-                first_place_amount=first_place_amount,
-                second_place_amount=second_place_amount,
-                third_place_amount=third_place_amount
-            )
-            db_session.add(league)
-        else:
-            league.name = league_name
-            league.prize_pool = prize_pool
-            league.first_place_amount = first_place_amount
-            league.second_place_amount = second_place_amount
-            league.third_place_amount = third_place_amount
-            if not league.league_pin:
-                league.league_pin = generate_pin(6)
-        db_session.commit()
-
-        for idx, team in enumerate(teams):
-            team_id = str(idx + 1)
-            existing = db_session.query(Roster).filter_by(league_id=league_id, team_id=team_id).first()
-            players_raw = team.get('players', '')
-            players_list = [p.strip() for p in players_raw.split(',') if p.strip()] if isinstance(players_raw, str) else (players_raw or [])
-
-            if not existing:
-                new_roster = Roster(
-                    id=str(uuid.uuid4()),
-                    league_id=league_id,
-                    team_id=team_id,
-                    team_name=team.get('team_name'),
-                    owner_name=None,
-                    players=players_list,
-                    wins=team.get('wins', 0),
-                    losses=team.get('losses', 0),
-                    points_for=team.get('points_for', 0),
-                    points_against=team.get('points_against', 0)
-                )
-                db_session.add(new_roster)
-            else:
-                existing.team_name = team.get('team_name')
-                existing.players = players_list
-                existing.wins = team.get('wins', 0)
-                existing.losses = team.get('losses', 0)
-                existing.points_for = team.get('points_for', 0)
-                existing.points_against = team.get('points_against', 0)
-
-        db_session.commit()
-
-        return jsonify({
-            "status": "saved",
-            "league_id": league_id,
-            "teams": len(teams),
-            "league_pin": league.league_pin
-        })
-    except Exception as e:
-        logger.error(f"Manual league setup failed: {str(e)}")
-        return jsonify({"status": "error", "error": str(e)}), 500
-
-@app.route('/join')
-def join_page():
-    return render_template('join.html')
-
-@app.route('/login')
-def login_page():
-    return render_template('login.html')
-
-@app.route('/api/league/find-by-pin', methods=['POST'])
-def find_league_by_pin():
-    try:
-        data = request.get_json()
-        league_pin = data.get('league_pin', '').strip()
-
-        if not league_pin:
-            return jsonify({"status": "error", "error": "league_pin required"}), 400
-
-        league = db_session.query(League).filter_by(league_pin=league_pin).first()
-        if not league:
-            return jsonify({"status": "error", "error": "No league found with that PIN"}), 404
-
-        rosters = db_session.query(Roster).filter_by(league_id=league.league_id).all()
-        teams = [
-            {"team_id": r.team_id, "team_name": r.team_name, "claimed": bool(r.claimed)}
-            for r in rosters
-        ]
-
-        return jsonify({
-            "status": "found",
-            "league_id": league.league_id,
-            "league_name": league.name,
-            "teams": teams
-        })
-    except Exception as e:
-        logger.error(f"Find league by pin failed: {str(e)}")
-        return jsonify({"status": "error", "error": str(e)}), 500
-
-@app.route('/api/team/claim-with-pin', methods=['POST'])
-def claim_team_with_pin():
-    try:
-        data = request.get_json()
-        league_id = data.get('league_id')
-        team_id = data.get('team_id')
-        team_pin = data.get('team_pin', '').strip()
-
-        if not league_id or not team_id or not team_pin:
-            return jsonify({"status": "error", "error": "league_id, team_id, and team_pin required"}), 400
-
-        if len(team_pin) != 4 or not team_pin.isdigit():
-            return jsonify({"status": "error", "error": "team_pin must be exactly 4 digits"}), 400
-
-        roster = db_session.query(Roster).filter_by(league_id=league_id, team_id=team_id).first()
-        if not roster:
-            return jsonify({"status": "error", "error": "Team not found"}), 404
-
-        if roster.claimed:
-            return jsonify({"status": "error", "error": "This team has already been claimed"}), 400
-
-        roster.team_pin = team_pin
-        roster.claimed = True
-        db_session.commit()
-
-        return jsonify({
-            "status": "claimed",
-            "league_id": league_id,
-            "team_id": team_id,
-            "team_name": roster.team_name
-        })
-    except Exception as e:
-        logger.error(f"Claim team with pin failed: {str(e)}")
-        return jsonify({"status": "error", "error": str(e)}), 500
-
-@app.route('/api/team/login-with-pin', methods=['POST'])
-def login_team_with_pin():
-    try:
-        data = request.get_json()
-        league_pin = data.get('league_pin', '').strip()
-        team_pin = data.get('team_pin', '').strip()
-
-        if not league_pin or not team_pin:
-            return jsonify({"status": "error", "error": "league_pin and team_pin required"}), 400
-
-        league = db_session.query(League).filter_by(league_pin=league_pin).first()
-        if not league:
-            return jsonify({"status": "error", "error": "No league found with that PIN"}), 404
-
-        roster = db_session.query(Roster).filter_by(
-            league_id=league.league_id, team_pin=team_pin, claimed=True
-        ).first()
-        if not roster:
-            return jsonify({"status": "error", "error": "Incorrect team PIN"}), 404
-
-        return jsonify({
-            "status": "logged in",
-            "league_id": league.league_id,
-            "league_name": league.name,
-            "team_id": roster.team_id,
-            "team_name": roster.team_name
-        })
-    except Exception as e:
-        logger.error(f"Login with pin failed: {str(e)}")
-        return jsonify({"status": "error", "error": str(e)}), 500
-
-@app.route('/api/recap/generate', methods=['POST', 'GET'])
-def generate_recap_endpoint():
-    try:
-        league_id = request.args.get('league_id') or os.getenv('SLEEPER_LEAGUE_ID')
-        week = request.args.get('week', '1')
-        league = db_session.query(League).filter_by(league_id=league_id).first()
-        if not league:
-            return jsonify({"status": "league not found"}), 404
-        recap_content = generate_recap(league_id, week)
-        recap = Recap(
-            id=str(uuid.uuid4()),
-            league_id=league_id,
-            week=str(week),
-            content=recap_content,
-            status='draft'
-        )
-        db_session.add(recap)
-        db_session.commit()
-        return jsonify({"status": "recap generated", "league_id": league_id, "week": week})
-    except Exception as e:
-        logger.error(f"Recap generation failed: {str(e)}")
-        return jsonify({"status": "error", "error": str(e)}), 500
-
-@app.route('/api/recap/draft', methods=['POST', 'GET'])
-def generate_draft_recap_endpoint():
-    try:
-        league_id = request.args.get('league_id') or os.getenv('SLEEPER_LEAGUE_ID')
-
-        league = db_session.query(League).filter_by(league_id=league_id).first()
-        if not league:
-            return jsonify({"status": "league not found"}), 404
-
-        rosters = db_session.query(Roster).filter_by(league_id=league_id).all()
-        roster_map = {r.team_id: r.team_name for r in rosters}
-
-        draft_id = sleeper.get_draft_id(league_id)
-        if not draft_id:
-            return jsonify({"status": "no draft found for this league"}), 404
-
-        picks = sleeper.get_draft_picks(draft_id)
-        players = sleeper.get_players_map()
-
-        picks_lines = []
-        for pick in picks:
-            player_id = pick.get('player_id')
-            player_info = players.get(player_id, {})
-            player_name = player_info.get('full_name', f"Player {player_id}")
-            position = player_info.get('position', '')
-            roster_id = str(pick.get('roster_id'))
-            team_name = roster_map.get(roster_id, f"Team {roster_id}")
-            pick_no = pick.get('pick_no')
-            picks_lines.append(f"Pick {pick_no}: {team_name} selected {player_name} ({position})")
-
-        draft_picks_text = chr(10).join(picks_lines)
-
-        recap_content = generate_draft_recap(league_id, draft_picks_text, league.name)
-
-        recap = Recap(
-            id=str(uuid.uuid4()),
-            league_id=league_id,
-            week="draft",
-            content=recap_content,
-            status='draft'
-        )
-        db_session.add(recap)
-        db_session.commit()
-
-        return jsonify({"status": "draft recap generated", "league_id": league_id})
-    except Exception as e:
-        logger.error(f"Draft recap generation failed: {str(e)}")
-        return jsonify({"status": "error", "error": str(e)}), 500
-
-@app.route('/api/recap/publish', methods=['POST', 'GET'])
-def publish_recap():
-    try:
-        league_id = request.args.get('league_id') or request.form.get('league_id')
-        week = request.args.get('week') or request.form.get('week', '1')
-        recap = db_session.query(Recap).filter_by(league_id=league_id, week=str(week)).first()
-        if not recap:
-            return jsonify({"status": "recap not found"}), 404
-        recap.status = 'published'
-        db_session.commit()
-        shareable_link = f"{request.host_url}recap/{league_id}/{week}"
-        return jsonify({
-            "status": "published",
-            "league_id": league_id,
-            "week": week,
-            "shareable_link": shareable_link
-        })
-    except Exception as e:
-        logger.error(f"Recap publish failed: {str(e)}")
-        return jsonify({"status": "error", "error": str(e)}), 500
-
-@app.route('/api/claim-team', methods=['POST', 'GET'])
-def claim_team():
-    try:
-        league_id = request.args.get('league_id') or os.getenv('SLEEPER_LEAGUE_ID')
-        team_id = request.args.get('team_id')
-        email = request.args.get('email', 'default@example.com')
-
-        if not team_id:
-            return jsonify({"status": "team_id required"}), 400
-
-        roster = db_session.query(Roster).filter_by(league_id=league_id, team_id=team_id).first()
-        if not roster:
-            return jsonify({"status": "roster not found"}), 404
-
-        user = db_session.query(User).filter_by(email=email).first()
-        if not user:
-            user = User(id=str(uuid.uuid4()), email=email, claimed_teams=f"{league_id}:{team_id}")
-            db_session.add(user)
-        else:
-            user.claimed_teams = f"{league_id}:{team_id}"
-        db_session.commit()
-
-        return jsonify({
-            "status": "team claimed",
-            "league_id": league_id,
-            "team_id": team_id,
-            "team_name": roster.team_name
-        })
-    except Exception as e:
-        logger.error(f"Claim team failed: {str(e)}")
-        return jsonify({"status": "error", "error": str(e)}), 500
-
-@app.route('/api/briefing/generate', methods=['POST', 'GET'])
-def generate_briefing_endpoint():
-    try:
-        league_id = request.args.get('league_id') or os.getenv('SLEEPER_LEAGUE_ID')
-        team_id = request.args.get('team_id')
-
-        if not team_id:
-            return jsonify({"status": "team_id required"}), 400
-
-        roster = db_session.query(Roster).filter_by(league_id=league_id, team_id=team_id).first()
-        if not roster:
-            return jsonify({"status": "roster not found"}), 404
-
-        bye_conflicts = []
-        weather_notes = []
-        try:
-            if roster.players:
-                resolved, unresolved = sleeper.resolve_teams_for_names(roster.players)
-                if unresolved:
-                    ai_resolved = ai_resolve_team_for_names(unresolved)
-                    resolved.update(ai_resolved)
-                bye_conflicts = build_bye_conflicts_from_team_map(resolved)
-
-                weather_by_team = get_weather_by_team()
-                weather_notes = build_weather_notes(resolved, weather_by_team)
-        except Exception as e:
-            logger.warning(f"Bye conflict / weather lookup failed: {str(e)}")
-
-        briefing_data = generate_briefing(league_id, team_id, bye_conflicts=bye_conflicts, weather_notes=weather_notes)
-
-        briefing = Briefing(
-            id=str(uuid.uuid4()),
-            league_id=league_id,
-            team_id=team_id,
-            team_name=roster.team_name,
-            content=briefing_data
-        )
-        db_session.add(briefing)
-        db_session.commit()
-
-        return jsonify({
-            "status": "briefing generated",
-            "league_id": league_id,
-            "team_id": team_id,
-            "briefing": briefing_data
-        })
-    except Exception as e:
-        logger.error(f"Briefing generation failed: {str(e)}")
-        return jsonify({"status": "error", "error": str(e)}), 500
-
-@app.route('/api/season-preview/generate', methods=['POST', 'GET'])
-def generate_season_preview_endpoint():
-    try:
-        league_id = request.args.get('league_id')
-        if not league_id:
-            return jsonify({"status": "error", "error": "league_id required"}), 400
-
-        preview_data = generate_season_preview(league_id)
-
-        return jsonify({
-            "status": "generated",
-            "league_id": league_id,
-            "preview": preview_data
-        })
-    except Exception as e:
-        logger.error(f"Season preview generation failed: {str(e)}")
-        return jsonify({"status": "error", "error": str(e)}), 500
-
-@app.route('/api/lineup/generate', methods=['POST', 'GET'])
-def generate_lineup_endpoint():
-    try:
-        league_id = request.args.get('league_id')
-        team_id = request.args.get('team_id')
-
-        if not league_id or not team_id:
-            return jsonify({"status": "error", "error": "league_id and team_id required"}), 400
-
-        weather_notes = []
-        try:
-            roster = db_session.query(Roster).filter_by(league_id=league_id, team_id=team_id).first()
-            if roster and roster.players:
-                resolved, unresolved = sleeper.resolve_teams_for_names(roster.players)
-                if unresolved:
-                    ai_resolved = ai_resolve_team_for_names(unresolved)
-                    resolved.update(ai_resolved)
-                weather_by_team = get_weather_by_team()
-                weather_notes = build_weather_notes(resolved, weather_by_team)
-        except Exception as e:
-            logger.warning(f"Weather lookup failed for lineup: {str(e)}")
-
-        lineup_data = generate_lineup_suggestion(league_id, team_id, weather_notes=weather_notes)
-
-        return jsonify({
-            "status": "generated",
-            "league_id": league_id,
-            "team_id": team_id,
-            "lineup": lineup_data
-        })
-    except Exception as e:
-        logger.error(f"Lineup generation failed: {str(e)}")
-        return jsonify({"status": "error", "error": str(e)}), 500
-
-@app.route('/api/stakes', methods=['GET'])
-def get_stakes():
-    try:
-        league_id = request.args.get('league_id')
-        if not league_id:
-            return jsonify({"status": "error", "error": "league_id required"}), 400
-
-        league = db_session.query(League).filter_by(league_id=league_id).first()
-        if not league:
-            return jsonify({"status": "error", "error": "league not found"}), 404
-
-        rosters = db_session.query(Roster).filter_by(league_id=league_id).all()
-
-        standings = sorted(
-            rosters,
-            key=lambda r: (-(r.wins or 0), (r.losses or 0), -(r.points_for or 0))
-        )
-
-        num_teams = len(standings)
-        results = []
-        for idx, r in enumerate(standings):
-            place = idx + 1
-            payout = 0.0
-            if place == 1:
-                payout = league.first_place_amount or 0
-            elif place == 2:
-                payout = league.second_place_amount or 0
-            elif place == 3:
-                payout = league.third_place_amount or 0
-
-            punishment_watch = place > num_teams - 2 if num_teams > 2 else False
-
-            results.append({
-                "place": place,
-                "team_name": r.team_name,
-                "wins": r.wins or 0,
-                "losses": r.losses or 0,
-                "points_for": r.points_for or 0,
-                "payout": payout,
-                "punishment_watch": punishment_watch
-            })
-
-        return jsonify({
-            "status": "ok",
-            "league_id": league_id,
-            "prize_pool": league.prize_pool or 0,
-            "first_place_amount": league.first_place_amount or 0,
-            "second_place_amount": league.second_place_amount or 0,
-            "third_place_amount": league.third_place_amount or 0,
-            "standings": results
-        })
-    except Exception as e:
-        logger.error(f"Get stakes failed: {str(e)}")
-        return jsonify({"status": "error", "error": str(e)}), 500
-
-@app.route('/api/recaps/list', methods=['GET'])
-def list_recaps():
-    try:
-        league_id = request.args.get('league_id')
-        if not league_id:
-            return jsonify({"status": "error", "error": "league_id required"}), 400
-
-        recaps = db_session.query(Recap).filter_by(
-            league_id=league_id, status='published'
-        ).order_by(Recap.created_at.desc()).all()
-
-        results = [
-            {"week": r.week, "created_at": r.created_at.isoformat() if r.created_at else None}
-            for r in recaps
-        ]
-
-        return jsonify({"status": "ok", "league_id": league_id, "recaps": results})
-    except Exception as e:
-        logger.error(f"List recaps failed: {str(e)}")
-        return jsonify({"status": "error", "error": str(e)}), 500
-
-@app.route('/team-home')
-def team_home():
-    try:
-        league_id = request.args.get('league_id')
-        team_id = request.args.get('team_id')
-
-        if not league_id or not team_id:
-            return "league_id and team_id required", 400
-
-        league = db_session.query(League).filter_by(league_id=league_id).first()
-        roster = db_session.query(Roster).filter_by(league_id=league_id, team_id=team_id).first()
-
-        if not league or not roster:
-            return "League or team not found", 404
-
-        return render_template('team_home.html', league=league, roster=roster)
-    except Exception as e:
-        logger.error(f"Team home error: {str(e)}")
-        return f"Error: {str(e)}", 500
-
-@app.route('/dashboard')
-def dashboard():
-    try:
-        league_id = request.args.get('league_id') or os.getenv('SLEEPER_LEAGUE_ID')
-        league = db_session.query(League).filter_by(league_id=league_id).first()
-        if not league:
-            return "League not found", 404
-        latest_recap = db_session.query(Recap).filter_by(league_id=league_id).order_by(Recap.created_at.desc()).first()
-        return render_template('dashboard.html', league=league, latest_recap=latest_recap)
-    except Exception as e:
-        logger.error(f"Dashboard error: {str(e)}")
-        return f"Error: {str(e)}", 500
-
-@app.route('/recap/<league_id>/<week>')
-def view_recap(league_id, week):
-    try:
-        recap = db_session.query(Recap).filter_by(league_id=league_id, week=week, status='published').first()
-        if not recap:
-            return "Recap not found or not published", 404
-        league = db_session.query(League).filter_by(league_id=league_id).first()
-        return render_template('recap.html', recap=recap, league=league)
-    except Exception as e:
-        logger.error(f"Recap view error: {str(e)}")
-        return f"Error: {str(e)}", 500
-
-@app.route('/briefing')
-def view_briefing():
-    try:
-        league_id = request.args.get('league_id') or os.getenv('SLEEPER_LEAGUE_ID')
-        team_id = request.args.get('team_id')
-
-        if not team_id:
-            return "team_id required", 400
-
-        briefing = db_session.query(Briefing).filter_by(
-            league_id=league_id, team_id=team_id
-        ).order_by(Briefing.created_at.desc()).first()
-
-        if not briefing:
-            return "Briefing not found. Generate one first.", 404
-
-        league = db_session.query(League).filter_by(league_id=league_id).first()
-
-        return render_template('briefing.html', briefing=briefing.content, league=league, team_id=team_id)
-    except Exception as e:
-        logger.error(f"Briefing view error: {str(e)}")
-        return f"Error: {str(e)}", 500
-
-@app.errorhandler(404)
-def not_found(error):
-    return jsonify({"error": "not found"}), 404
-
-@app.errorhandler(500)
-def server_error(error):
-    logger.error(f"Server error: {str(error)}")
-    return jsonify({"error": "server error"}), 500
-
-if __name__ == '__main__':
-    port = int(os.getenv('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ roster.team_name }} - {{ league.name }}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0B0F17; color: #F5F3EE; padding: 30px 16px 60px; }
+        .container { max-width: 700px; margin: 0 auto; }
+        .header { margin-bottom: 20px; }
+        .header .eyebrow { color: #FFB020; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 6px; }
+        .header h1 { font-size: 24px; font-weight: 800; }
+        .tabs { display: flex; gap: 6px; margin-bottom: 24px; border-bottom: 1px solid #2A3245; overflow-x: auto; }
+        .tab-btn { background: none; border: none; color: #8B93A7; font-size: 13px; font-weight: 600; padding: 10px 14px; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
+        .tab-btn.active { color: #FFB020; border-bottom-color: #FFB020; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .card { background: #151B29; border: 1px solid #2A3245; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+        .card-tag { display: inline-block; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #FFB020; margin-bottom: 8px; }
+        .card h2 { font-size: 16px; font-weight: 600; line-height: 1.4; margin-bottom: 8px; }
+        .card p { color: #8B93A7; font-size: 14px; line-height: 1.6; }
+        .rank-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #2A3245; font-size: 14px; }
+        .rank-row:last-child { border-bottom: none; }
+        .rank-num { font-family: monospace; color: #8B93A7; width: 24px; }
+        .btn { display: inline-block; background: #FFB020; color: #3A2600; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-weight: 600; border: none; cursor: pointer; font-size: 13px; }
+        .btn:hover { background: #E6A018; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .loading { color: #8B93A7; font-size: 13px; padding: 20px 0; text-align: center; }
+        .insight { padding: 12px 0; border-bottom: 1px solid #2A3245; font-size: 13px; line-height: 1.5; }
+        .insight-source { font-family: monospace; font-size: 10px; color: #5EEAD4; margin-top: 6px; }
+        .flag-card { background: #1F5A50; border-radius: 12px; padding: 13px 14px; margin-top: 10px; border: 1px solid #2A3245; }
+        .flag-tag { font-family: monospace; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; color: #5EEAD4; margin-bottom: 6px; }
+        .stakes-header { background: #1F5A50; border-radius: 12px; padding: 20px; text-align: center; margin-bottom: 16px; }
+        .stakes-header .pool { font-size: 28px; font-weight: 800; color: #5EEAD4; }
+        .stakes-header .breakdown { font-size: 12px; color: #F5F3EE; margin-top: 8px; }
+        .standings-row { display: grid; grid-template-columns: 30px 1fr 70px 70px; align-items: center; padding: 10px 0; border-bottom: 1px solid #2A3245; font-size: 13px; }
+        .standings-row:last-child { border-bottom: none; }
+        .standings-row.punishment { color: #FF6B5E; }
+        .payout { color: #5EEAD4; font-weight: 600; }
+        .recap-item { padding: 12px 0; border-bottom: 1px solid #2A3245; display: flex; justify-content: space-between; align-items: center; }
+        .recap-item:last-child { border-bottom: none; }
+        .recap-item a { color: #5EEAD4; text-decoration: none; font-size: 13px; }
+
+        @media (max-width: 640px) {
+            body { padding: 20px 12px 90px; }
+            .tabs {
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                margin: 0;
+                background: #0B0F17;
+                border-top: 1px solid #2A3245;
+                border-bottom: none;
+                padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+                justify-content: space-around;
+                z-index: 100;
+                overflow-x: visible;
+            }
+            .tab-btn {
+                flex: 1;
+                text-align: center;
+                padding: 10px 4px;
+                border-bottom: none;
+                border-radius: 8px;
+                font-size: 11px;
+            }
+            .tab-btn.active {
+                background: #151B29;
+                border-bottom: none;
+            }
+            .card { padding: 16px; }
+            .header h1 { font-size: 20px; }
+            .standings-row { grid-template-columns: 24px 1fr 60px 60px; font-size: 12px; }
+        }
+        .lineup-slot { border-bottom: 1px solid #2A3245; padding: 8px 0; }
+        .lineup-slot:last-child { border-bottom: none; }
+        .info-btn { background: none; border: none; color: #5EEAD4; font-size: 14px; cursor: pointer; margin-left: auto; padding: 0 4px; }
+        .reason-text { font-size: 12px; color: #8B93A7; line-height: 1.5; margin-top: 4px; padding-left: 34px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="eyebrow">{{ league.name }}</div>
+            <h1>{{ roster.team_name }}</h1>
+        </div>
+
+        <div class="tabs">
+            <button class="tab-btn active" onclick="showTab('home')">Home</button>
+            <button class="tab-btn" onclick="showTab('briefing')">Briefing</button>
+            <button class="tab-btn" onclick="showTab('recaps')">Recaps</button>
+            <button class="tab-btn" onclick="showTab('stakes')">Stakes</button>
+        </div>
+
+        <div id="tab-home" class="tab-content active">
+            <div id="home-loading" class="loading">Tap below to generate this season's preview</div>
+            <button class="btn" id="home-generate-btn" onclick="loadHome()">Generate Season Preview</button>
+            <div id="home-content"></div>
+
+            <div style="margin-top: 24px;">
+                <div id="lineup-loading" class="loading">Tap below for your suggested starting lineup</div>
+                <button class="btn" id="lineup-generate-btn" onclick="loadLineup()">Generate Suggested Lineup</button>
+                <div id="lineup-content"></div>
+            </div>
+        </div>
+
+        <div id="tab-briefing" class="tab-content">
+            <div id="briefing-loading" class="loading">Tap below to generate your briefing</div>
+            <button class="btn" id="briefing-generate-btn" onclick="loadBriefing()">Generate My Briefing</button>
+            <div id="briefing-content"></div>
+        </div>
+
+        <div id="tab-recaps" class="tab-content">
+            <div id="recaps-content" class="loading">Loading recaps...</div>
+        </div>
+
+        <div id="tab-stakes" class="tab-content">
+            <div id="stakes-content" class="loading">Loading stakes...</div>
+        </div>
+    </div>
+
+    <script>
+        const leagueId = "{{ league.league_id }}";
+        const teamId = "{{ roster.team_id }}";
+        const loadedTabs = {};
+
+        function showTab(name) {
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
+            document.querySelector(`.tab-btn[onclick="showTab('${name}')"]`).classList.add('active');
+            document.getElementById(`tab-${name}`).classList.add('active');
+
+            if (name === 'recaps' && !loadedTabs.recaps) {
+                loadRecaps();
+                loadedTabs.recaps = true;
+            }
+            if (name === 'stakes' && !loadedTabs.stakes) {
+                loadStakes();
+                loadedTabs.stakes = true;
+            }
+        }
+
+        function toggleReason(id) {
+            const el = document.getElementById(id);
+            if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+        }
+
+        async function loadHome() {
+            const btn = document.getElementById('home-generate-btn');
+            const loadingEl = document.getElementById('home-loading');
+            const contentEl = document.getElementById('home-content');
+            btn.disabled = true;
+            loadingEl.textContent = 'Generating season preview...';
+            contentEl.innerHTML = '';
+
+            try {
+                const res = await fetch(`/api/season-preview/generate?league_id=${leagueId}`);
+                const data = await res.json();
+                if (data.status !== 'generated') throw new Error(data.error || 'Failed to generate preview.');
+
+                const p = data.preview;
+                loadingEl.textContent = '';
+                btn.style.display = 'none';
+
+                let rankingsHtml = '';
+                (p.power_rankings || []).forEach(r => {
+                    rankingsHtml += `<div class="rank-row"><span class="rank-num">${r.rank}</span><span>${r.team}</span></div>`;
+                });
+
+                contentEl.innerHTML = `
+                    <div class="card">
+                        <div class="card-tag">Team to Beat</div>
+                        <h2>${p.team_to_beat || 'N/A'}</h2>
+                    </div>
+                    <div class="card">
+                        <div class="card-tag">Rebuild Watch</div>
+                        <h2>${p.rebuild_watch || 'N/A'}</h2>
+                    </div>
+                    <div class="card">
+                        <h2 style="margin-bottom:12px;">Power Rankings</h2>
+                        ${rankingsHtml || '<p>No rankings available.</p>'}
+                    </div>
+                    <div class="card">
+                        <div class="card-tag">🔥 Bold Prediction</div>
+                        <p>${p.bold_prediction || 'N/A'}</p>
+                    </div>
+                `;
+            } catch (err) {
+                loadingEl.textContent = err.message;
+                btn.disabled = false;
+            }
+        }
+
+        async function loadLineup() {
+            const btn = document.getElementById('lineup-generate-btn');
+            const loadingEl = document.getElementById('lineup-loading');
+            const contentEl = document.getElementById('lineup-content');
+            btn.disabled = true;
+            loadingEl.textContent = 'Setting your lineup...';
+            contentEl.innerHTML = '';
+
+            try {
+                const res = await fetch(`/api/lineup/generate?league_id=${leagueId}&team_id=${teamId}`);
+                const data = await res.json();
+                if (data.status !== 'generated') throw new Error(data.error || 'Failed to generate lineup.');
+
+                const l = data.lineup;
+                loadingEl.textContent = '';
+                btn.style.display = 'none';
+
+                let rows = '';
+                (l.lineup || []).forEach((slot, idx) => {
+                    const reasonId = `lineup-reason-${idx}`;
+                    rows += `
+                        <div class="lineup-slot">
+                            <div class="rank-row" style="border-bottom:none; padding-bottom:2px;">
+                                <span class="rank-num">${slot.slot}</span>
+                                <span>${slot.player || 'TBD'}</span>
+                                ${slot.reason ? `<button class="info-btn" onclick="toggleReason('${reasonId}')">ⓘ</button>` : ''}
+                            </div>
+                            ${slot.reason ? `<div class="reason-text" id="${reasonId}" style="display:none;">${slot.reason}</div>` : ''}
+                        </div>
+                    `;
+                });
+
+                contentEl.innerHTML = `
+                    <div class="card">
+                        <h2 style="margin-bottom:12px;">Suggested Starting Lineup</h2>
+                        ${rows || '<p>No lineup available.</p>'}
+                        ${l.flex_reasoning ? `<p style="margin-top:10px;"><strong>FLEX pick:</strong> ${l.flex_reasoning}</p>` : ''}
+                    </div>
+                `;
+            } catch (err) {
+                loadingEl.textContent = err.message;
+                btn.disabled = false;
+            }
+        }
+
+        async function loadBriefing() {
+            const btn = document.getElementById('briefing-generate-btn');
+            const loadingEl = document.getElementById('briefing-loading');
+            const contentEl = document.getElementById('briefing-content');
+            btn.disabled = true;
+            loadingEl.textContent = 'Generating your briefing...';
+            contentEl.innerHTML = '';
+
+            try {
+                const res = await fetch(`/api/briefing/generate?league_id=${leagueId}&team_id=${teamId}`);
+                const data = await res.json();
+                if (data.status !== 'briefing generated') throw new Error(data.error || 'Failed to generate briefing.');
+
+                const b = data.briefing;
+                loadingEl.textContent = '';
+                btn.style.display = 'none';
+
+                let html = '';
+                (b.insights || []).forEach(i => {
+                    html += `<div class="insight">${i.text}<div class="insight-source">📋 ${i.source}</div></div>`;
+                });
+
+                if (b.lineup_warning) {
+                    html += `<div class="flag-card"><div class="flag-tag">Lineup Flag</div><div>${b.lineup_warning}</div></div>`;
+                }
+
+                contentEl.innerHTML = html || '<p style="color:#8B93A7;">No insights available.</p>';
+            } catch (err) {
+                loadingEl.textContent = err.message;
+                btn.disabled = false;
+            }
+        }
+
+        async function loadRecaps() {
+            const contentEl = document.getElementById('recaps-content');
+            try {
+                const res = await fetch(`/api/recaps/list?league_id=${leagueId}`);
+                const data = await res.json();
+                if (data.status !== 'ok') throw new Error(data.error || 'Failed to load recaps.');
+
+                if (!data.recaps || data.recaps.length === 0) {
+                    contentEl.innerHTML = '<div class="card"><p>No recaps published yet. Check back after Week 1!</p></div>';
+                    return;
+                }
+
+                let html = '<div class="card">';
+                data.recaps.forEach(r => {
+                    html += `<div class="recap-item"><span>Week ${r.week}</span><a href="/recap/${leagueId}/${r.week}">View →</a></div>`;
+                });
+                html += '</div>';
+                contentEl.innerHTML = html;
+            } catch (err) {
+                contentEl.innerHTML = `<p style="color:#FF6B5E;">${err.message}</p>`;
+            }
+        }
+
+        async function loadStakes() {
+            const contentEl = document.getElementById('stakes-content');
+            try {
+                const res = await fetch(`/api/stakes?league_id=${leagueId}`);
+                const data = await res.json();
+                if (data.status !== 'ok') throw new Error(data.error || 'Failed to load stakes.');
+
+                let html = `
+                    <div class="stakes-header">
+                        <div class="pool">$${data.prize_pool}</div>
+                        <div class="breakdown">1st: $${data.first_place_amount} · 2nd: $${data.second_place_amount} · 3rd: $${data.third_place_amount}</div>
+                    </div>
+                    <div class="card">
+                        <div class="standings-row" style="color:#8B93A7; font-size:11px; text-transform:uppercase;">
+                            <span>#</span><span>Team</span><span>Record</span><span>Payout</span>
+                        </div>
+                `;
+
+                data.standings.forEach(s => {
+                    const rowClass = s.punishment_watch ? 'standings-row punishment' : 'standings-row';
+                    const payoutText = s.payout > 0 ? `$${s.payout}` : (s.punishment_watch ? '⚠️' : '—');
+                    html += `<div class="${rowClass}"><span>${s.place}</span><span>${s.team_name}</span><span>${s.wins}-${s.losses}</span><span class="payout">${payoutText}</span></div>`;
+                });
+
+                html += '</div>';
+                contentEl.innerHTML = html;
+            } catch (err) {
+                contentEl.innerHTML = `<p style="color:#FF6B5E;">${err.message}</p>`;
+            }
+        }
+
+        loadHome();
+        loadLineup();
+        loadBriefing();
+    </script>
+</body>
+</html>
