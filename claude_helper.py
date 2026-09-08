@@ -93,6 +93,23 @@ def _extract_text(message):
         text = "<h2>No text content returned</h2>"
     return text
 
+def _parse_json_safely(raw_text, fallback):
+    """Strip markdown code fences if present, then parse JSON.
+    Returns fallback (a callable taking raw_text, or a dict) on failure."""
+    cleaned = raw_text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("```")[1] if "```" in cleaned[3:] else cleaned[3:]
+        if cleaned.lower().startswith("json"):
+            cleaned = cleaned[4:]
+        cleaned = cleaned.rsplit("```", 1)[0] if "```" in cleaned else cleaned
+    cleaned = cleaned.strip()
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        if callable(fallback):
+            return fallback(raw_text)
+        return fallback
+
 def generate_recap(league_id, week):
     try:
         client = anthropic.Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
@@ -178,7 +195,7 @@ def generate_briefing(league_id, team_id, bye_conflicts=None):
 
         message = client.messages.create(
             model="claude-sonnet-5",
-            max_tokens=512,
+            max_tokens=1024,
             messages=[
                 {"role": "user", "content": prompt}
             ]
@@ -186,13 +203,13 @@ def generate_briefing(league_id, team_id, bye_conflicts=None):
 
         raw_text = _extract_text(message)
 
-        try:
-            briefing_data = json.loads(raw_text)
-        except Exception:
-            briefing_data = {
-                "insights": [{"text": raw_text, "source": "AI"}],
+        def _briefing_fallback(text):
+            return {
+                "insights": [{"text": "Briefing couldn't be parsed this time. Try generating again.", "source": "System"}],
                 "lineup_warning": None
             }
+
+        briefing_data = _parse_json_safely(raw_text, _briefing_fallback)
 
         logger.info(f"Generated Claude briefing for team {team_id} in league {league_id}")
         return briefing_data
@@ -258,7 +275,7 @@ def ai_resolve_team_for_names(names):
         )
 
         raw_text = _extract_text(message)
-        result = json.loads(raw_text)
+        result = _parse_json_safely(raw_text, {})
         return {k: v for k, v in result.items() if v}
 
     except Exception as e:
@@ -282,7 +299,7 @@ def generate_lineup_suggestion(league_id, team_id):
 
         message = client.messages.create(
             model="claude-sonnet-5",
-            max_tokens=768,
+            max_tokens=1024,
             messages=[
                 {"role": "user", "content": prompt}
             ]
@@ -290,10 +307,10 @@ def generate_lineup_suggestion(league_id, team_id):
 
         raw_text = _extract_text(message)
 
-        try:
-            lineup_data = json.loads(raw_text)
-        except Exception:
-            lineup_data = {"lineup": [], "flex_reasoning": raw_text}
+        def _lineup_fallback(text):
+            return {"lineup": [], "flex_reasoning": "Lineup couldn't be parsed this time. Try generating again."}
+
+        lineup_data = _parse_json_safely(raw_text, _lineup_fallback)
 
         logger.info(f"Generated Claude lineup suggestion for team {team_id} in league {league_id}")
         return lineup_data
@@ -324,7 +341,7 @@ def generate_season_preview(league_id):
 
         message = client.messages.create(
             model="claude-sonnet-5",
-            max_tokens=1024,
+            max_tokens=1536,
             messages=[
                 {"role": "user", "content": prompt}
             ]
@@ -332,15 +349,15 @@ def generate_season_preview(league_id):
 
         raw_text = _extract_text(message)
 
-        try:
-            preview_data = json.loads(raw_text)
-        except Exception:
-            preview_data = {
+        def _preview_fallback(text):
+            return {
                 "team_to_beat": "",
                 "rebuild_watch": "",
                 "power_rankings": [],
-                "bold_prediction": raw_text
+                "bold_prediction": "Preview couldn't be parsed this time. Try generating again."
             }
+
+        preview_data = _parse_json_safely(raw_text, _preview_fallback)
 
         logger.info(f"Generated Claude season preview for league {league_id}")
         return preview_data
