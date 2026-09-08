@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 from database import init_db, db_session, League, Recap, Briefing, User, Roster
 from sleeper_client import SleeperClient, build_bye_conflicts_from_team_map
 from espn_data import get_weather_by_team, build_weather_notes, get_relevant_news, build_news_notes
+from fantasypros_data import get_projected_points_for_names, build_projection_notes
 from claude_helper import generate_recap, generate_draft_recap, generate_briefing, generate_season_preview, ai_resolve_team_for_names, generate_lineup_suggestion
 
 sleeper = SleeperClient()
@@ -440,6 +441,7 @@ def generate_briefing_endpoint():
         bye_conflicts = []
         weather_notes = []
         news_notes = []
+        projection_notes = []
         try:
             if roster.players:
                 resolved, unresolved = sleeper.resolve_teams_for_names(roster.players)
@@ -453,10 +455,13 @@ def generate_briefing_endpoint():
 
                 news_items = get_relevant_news(roster.players)
                 news_notes = build_news_notes(news_items)
-        except Exception as e:
-            logger.warning(f"Bye conflict / weather / news lookup failed: {str(e)}")
 
-        briefing_data = generate_briefing(league_id, team_id, bye_conflicts=bye_conflicts, weather_notes=weather_notes, news_notes=news_notes)
+                projections = get_projected_points_for_names(roster.players)
+                projection_notes = build_projection_notes(projections)
+        except Exception as e:
+            logger.warning(f"Bye conflict / weather / news / projections lookup failed: {str(e)}")
+
+        briefing_data = generate_briefing(league_id, team_id, bye_conflicts=bye_conflicts, weather_notes=weather_notes, news_notes=news_notes, projection_notes=projection_notes)
 
         briefing = Briefing(
             id=str(uuid.uuid4()),
@@ -507,6 +512,7 @@ def generate_lineup_endpoint():
 
         weather_notes = []
         news_notes = []
+        projection_notes = []
         try:
             roster = db_session.query(Roster).filter_by(league_id=league_id, team_id=team_id).first()
             if roster and roster.players:
@@ -519,10 +525,13 @@ def generate_lineup_endpoint():
 
                 news_items = get_relevant_news(roster.players)
                 news_notes = build_news_notes(news_items)
-        except Exception as e:
-            logger.warning(f"Weather / news lookup failed for lineup: {str(e)}")
 
-        lineup_data = generate_lineup_suggestion(league_id, team_id, weather_notes=weather_notes, news_notes=news_notes)
+                projections = get_projected_points_for_names(roster.players)
+                projection_notes = build_projection_notes(projections)
+        except Exception as e:
+            logger.warning(f"Weather / news / projections lookup failed for lineup: {str(e)}")
+
+        lineup_data = generate_lineup_suggestion(league_id, team_id, weather_notes=weather_notes, news_notes=news_notes, projection_notes=projection_notes)
 
         return jsonify({
             "status": "generated",
@@ -552,6 +561,7 @@ def get_full_roster():
         weather_by_team = get_weather_by_team()
         news_items = get_relevant_news(player_names)
         news_by_player = {item['player']: item for item in news_items}
+        projections = get_projected_points_for_names(player_names)
 
         bye_conflicts = []
         players_out = []
@@ -570,6 +580,7 @@ def get_full_roster():
             team = info.get('team') if info else None
             position = info.get('position') if info else None
             injury_status = info.get('injury_status') if info else None
+            projected_points = projections.get(name)
 
             notes = []
             if name in news_by_player:
@@ -586,6 +597,7 @@ def get_full_roster():
                 "team": team,
                 "position": position,
                 "injury_status": injury_status,
+                "projected_points": projected_points,
                 "notes": notes
             })
 
