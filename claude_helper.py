@@ -415,20 +415,26 @@ Speak directly to the manager as "you" and refer to the opponent by name or as "
 
 1. "game_outlook": one short phrase giving the overall verdict, like "You're expected to win comfortably", "This is a close matchup", "Your opponent is favored", or similar - pick whichever tone actually fits based on the roster comparison.
 
-2. "strengths": 1-2 short points on where you have the advantage over your opponent.
+2. "summary": a real 2-4 sentence overall analysis of the matchup - tie together why the game_outlook verdict makes sense, referencing the key roster differences that decide it. This should read like an actual analyst take, not a list of bullet points restated.
 
-3. "weaknesses": 1-2 short points on where you're at a disadvantage against your opponent.
+3. "strengths": 1-2 short points on where you have the advantage over your opponent.
 
-4. "players_to_watch": 1-3 short items naming specific players (yours or your opponent's) worth keeping an eye on this week and why - could be a breakout threat, a matchup advantage, or someone whose performance could swing the result.
+4. "weaknesses": 1-2 short points on where you're at a disadvantage against your opponent.
+
+5. "players_to_watch": 1-3 short items naming specific players (yours or your opponent's) worth keeping an eye on this week and why - could be a breakout threat, a matchup advantage, or someone whose performance could swing the result.
+
+6. "suggested_moves": 1-3 short, concrete, actionable suggestions specific to winning THIS matchup - e.g. a lineup consideration given the opponent's weak spot, a position where you should prioritize a waiver add before this game, or a start/sit call that matters more because of who you're facing. Make these genuinely tied to the matchup, not generic advice.
 
 Base this on roster construction, depth, and your knowledge of the players. Keep it fun but grounded, like a sports analyst breaking down the matchup.
 
 Respond ONLY as a JSON object in this exact shape, no other text:
 {{
   "game_outlook": "short verdict phrase",
+  "summary": "2-4 sentence overall analysis",
   "strengths": [{{"text": "short point"}}],
   "weaknesses": [{{"text": "short point"}}],
-  "players_to_watch": [{{"text": "short point naming a player and why"}}]
+  "players_to_watch": [{{"text": "short point naming a player and why"}}],
+  "suggested_moves": [{{"text": "short actionable suggestion"}}]
 }}"""
 
 def generate_matchup_preview(team_a_name, team_a_players, team_b_name, team_b_players):
@@ -444,7 +450,7 @@ def generate_matchup_preview(team_a_name, team_a_players, team_b_name, team_b_pl
 
         message = client.messages.create(
             model="claude-sonnet-5",
-            max_tokens=1536,
+            max_tokens=2048,
             messages=[
                 {"role": "user", "content": prompt}
             ]
@@ -453,7 +459,7 @@ def generate_matchup_preview(team_a_name, team_a_players, team_b_name, team_b_pl
         raw_text = _extract_text(message)
 
         def _matchup_fallback(text):
-            return {"game_outlook": "Matchup preview couldn't be parsed this time.", "strengths": [], "weaknesses": [], "players_to_watch": []}
+            return {"game_outlook": "Matchup preview couldn't be parsed this time.", "summary": "", "strengths": [], "weaknesses": [], "players_to_watch": [], "suggested_moves": []}
 
         matchup_data = _parse_json_safely(raw_text, _matchup_fallback)
         logger.info(f"Generated Claude matchup preview: {team_a_name} vs {team_b_name}")
@@ -461,7 +467,7 @@ def generate_matchup_preview(team_a_name, team_a_players, team_b_name, team_b_pl
 
     except Exception as e:
         logger.error(f"Error generating matchup preview with Claude: {str(e)}")
-        return {"game_outlook": f"Failed: {str(e)}", "strengths": [], "weaknesses": [], "players_to_watch": []}
+        return {"game_outlook": f"Failed: {str(e)}", "summary": "", "strengths": [], "weaknesses": [], "players_to_watch": [], "suggested_moves": []}
 
 def generate_season_preview(league_id):
     try:
