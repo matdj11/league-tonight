@@ -106,6 +106,8 @@
         </div>
 
         <div id="tab-home" class="tab-content active">
+            <div id="matchup-content" class="loading">Loading this week's matchup...</div>
+
             <div id="home-loading" class="loading">Tap below to generate this season's preview</div>
             <button class="btn" id="home-generate-btn" onclick="loadHome()">Generate Season Preview</button>
             <div id="home-content"></div>
@@ -165,6 +167,73 @@
         function toggleReason(id) {
             const el = document.getElementById(id);
             if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+        }
+
+        async function loadMatchup() {
+            const contentEl = document.getElementById('matchup-content');
+            try {
+                const res = await fetch(`/api/matchup/current?league_id=${leagueId}&team_id=${teamId}`);
+                const data = await res.json();
+
+                if (data.status === 'not_set') {
+                    const teamsRes = await fetch(`/api/league/teams?league_id=${leagueId}&exclude_team_id=${teamId}`);
+                    const teamsData = await teamsRes.json();
+                    let options = '<option value="">Select opponent...</option>';
+                    (teamsData.teams || []).forEach(t => {
+                        options += `<option value="${t.team_id}">${t.team_name}</option>`;
+                    });
+                    contentEl.innerHTML = `
+                        <div class="card">
+                            <h2 style="margin-bottom:10px;">Set This Week's Matchup</h2>
+                            <p style="margin-bottom:10px;">Who are you playing this week?</p>
+                            <select id="opponent-select" style="width:100%; padding:10px; background:#0B0F17; border:1px solid #2A3245; border-radius:8px; color:#F5F3EE; margin-bottom:10px;">${options}</select>
+                            <button class="btn" onclick="setOpponent()">Save Matchup</button>
+                        </div>
+                    `;
+                    return;
+                }
+
+                if (data.status !== 'ok') throw new Error(data.error || 'Failed to load matchup.');
+
+                const p = data.preview;
+                let strengthsHtml = (p.strengths || []).map(s => `<div class="bubble">${s.text}</div>`).join('');
+                let weaknessesHtml = (p.weaknesses || []).map(w => `<div class="bubble">${w.text}</div>`).join('');
+
+                contentEl.innerHTML = `
+                    <div class="card">
+                        <div class="card-tag">Week ${data.week} Matchup</div>
+                        <h2 style="margin-bottom:12px;">vs ${data.opponent_name}</h2>
+                        <div style="font-size:12px; color:#5EEAD4; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:6px;">Strengths</div>
+                        ${strengthsHtml || '<p style="color:#8B93A7; font-size:13px;">No clear edge identified.</p>'}
+                        <div style="font-size:12px; color:#FF6B5E; text-transform:uppercase; letter-spacing:0.05em; margin:12px 0 6px;">Weaknesses</div>
+                        ${weaknessesHtml || '<p style="color:#8B93A7; font-size:13px;">No clear disadvantage identified.</p>'}
+                        <p style="margin-top:12px;"><strong>Outlook:</strong> ${p.outlook || 'N/A'}</p>
+                    </div>
+                `;
+            } catch (err) {
+                contentEl.innerHTML = `<p style="color:#FF6B5E;">${err.message}</p>`;
+            }
+        }
+
+        async function setOpponent() {
+            const select = document.getElementById('opponent-select');
+            const opponentId = select.value;
+            if (!opponentId) return;
+
+            try {
+                await fetch('/api/matchup/set-opponent', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        league_id: leagueId,
+                        team_id: teamId,
+                        opponent_team_id: opponentId
+                    })
+                });
+                loadMatchup();
+            } catch (err) {
+                console.error(err);
+            }
         }
 
         async function loadHome() {
@@ -408,6 +477,7 @@
         loadHome();
         loadLineup();
         loadRoster();
+        loadMatchup();
     </script>
 </body>
 </html>
