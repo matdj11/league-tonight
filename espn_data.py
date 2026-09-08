@@ -63,3 +63,23 @@ def build_weather_notes(name_to_team, weather_by_team):
         if team_upper in weather_by_team:
             notes.append(f"{name} ({team_upper}): {weather_by_team[team_upper]}")
     return notes
+
+NEWS_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/news?limit=50"
+
+def get_relevant_news(player_names):
+    """Fetch recent NFL news headlines from ESPN's public feed and return
+    only the ones that mention a player from the given roster. This is a
+    real, live check - no manual uploading, no guessing."""
+    if not player_names:
+        return []
+    try:
+        response = requests.get(NEWS_URL, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+
+        articles = data.get("articles", [])
+        relevant = []
+
+        for name in player_names:
+            name_lower = name.lower()
+            for article in
