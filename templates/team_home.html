@@ -73,6 +73,19 @@
             .header h1 { font-size: 20px; }
             .standings-row { grid-template-columns: 24px 1fr 60px 60px; font-size: 12px; }
         }
+        .lineup-slot { border-bottom: 1px solid #2A3245; padding: 8px 0; }
+        .lineup-slot:last-child { border-bottom: none; }
+        .info-btn { background: none; border: none; color: #5EEAD4; font-size: 14px; cursor: pointer; margin-left: auto; padding: 0 4px; }
+        .reason-text { font-size: 12px; color: #8B93A7; line-height: 1.5; margin-top: 4px; padding-left: 34px; }
+        .roster-player { border-bottom: 1px solid #2A3245; padding: 10px 0; }
+        .roster-player:last-child { border-bottom: none; }
+        .roster-player-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+        .roster-player-name { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+        .badge-pos { background: #2A3245; color: #F5F3EE; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; }
+        .badge-team { background: #1F5A50; color: #5EEAD4; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; }
+        .badge-status { font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; }
+        .badge-status-out { background: #4A1F1F; color: #FF6B5E; }
+        .badge-status-warn { background: #4A3B1F; color: #FFB020; }
     </style>
 </head>
 <body>
@@ -98,6 +111,11 @@
                 <div id="lineup-loading" class="loading">Tap below for your suggested starting lineup</div>
                 <button class="btn" id="lineup-generate-btn" onclick="loadLineup()">Generate Suggested Lineup</button>
                 <div id="lineup-content"></div>
+            </div>
+
+            <div style="margin-top: 24px;">
+                <h2 style="font-size:16px; margin-bottom:12px;">My Roster</h2>
+                <div id="roster-content" class="loading">Loading your roster...</div>
             </div>
         </div>
 
@@ -135,6 +153,11 @@
                 loadStakes();
                 loadedTabs.stakes = true;
             }
+        }
+
+        function toggleReason(id) {
+            const el = document.getElementById(id);
+            if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
         }
 
         async function loadHome() {
@@ -201,8 +224,18 @@
                 btn.style.display = 'none';
 
                 let rows = '';
-                (l.lineup || []).forEach(slot => {
-                    rows += `<div class="rank-row"><span class="rank-num">${slot.slot}</span><span>${slot.player || 'TBD'}</span></div>`;
+                (l.lineup || []).forEach((slot, idx) => {
+                    const reasonId = `lineup-reason-${idx}`;
+                    rows += `
+                        <div class="lineup-slot">
+                            <div class="rank-row" style="border-bottom:none; padding-bottom:2px;">
+                                <span class="rank-num">${slot.slot}</span>
+                                <span>${slot.player || 'TBD'}</span>
+                                ${slot.reason ? `<button class="info-btn" onclick="toggleReason('${reasonId}')">ⓘ</button>` : ''}
+                            </div>
+                            ${slot.reason ? `<div class="reason-text" id="${reasonId}" style="display:none;">${slot.reason}</div>` : ''}
+                        </div>
+                    `;
                 });
 
                 contentEl.innerHTML = `
@@ -215,6 +248,52 @@
             } catch (err) {
                 loadingEl.textContent = err.message;
                 btn.disabled = false;
+            }
+        }
+
+        async function loadRoster() {
+            const contentEl = document.getElementById('roster-content');
+            try {
+                const res = await fetch(`/api/roster/full?league_id=${leagueId}&team_id=${teamId}`);
+                const data = await res.json();
+                if (data.status !== 'ok') throw new Error(data.error || 'Failed to load roster.');
+
+                if (!data.players || data.players.length === 0) {
+                    contentEl.innerHTML = '<p style="color:#8B93A7;">No players found.</p>';
+                    return;
+                }
+
+                let html = '<div class="card">';
+                data.players.forEach((p, idx) => {
+                    const noteId = `roster-note-${idx}`;
+                    const posBadge = p.position ? `<span class="badge-pos">${p.position}</span>` : '';
+                    const teamBadge = p.team ? `<span class="badge-team">${p.team}</span>` : '';
+                    let statusBadge = '';
+                    if (p.injury_status) {
+                        const statusClass = p.injury_status.toLowerCase() === 'out' ? 'badge-status-out' : 'badge-status-warn';
+                        statusBadge = `<span class="badge-status ${statusClass}">${p.injury_status}</span>`;
+                    }
+                    const hasNotes = p.notes && p.notes.length > 0;
+
+                    html += `
+                        <div class="roster-player">
+                            <div class="roster-player-row">
+                                <div class="roster-player-name">
+                                    ${p.name}
+                                    ${posBadge}${teamBadge}${statusBadge}
+                                </div>
+                                <button class="info-btn" onclick="toggleReason('${noteId}')">ⓘ</button>
+                            </div>
+                            <div class="reason-text" id="${noteId}" style="display:none;">
+                                ${hasNotes ? p.notes.join('<br>') : 'No notable updates right now.'}
+                            </div>
+                        </div>
+                    `;
+                });
+                html += '</div>';
+                contentEl.innerHTML = html;
+            } catch (err) {
+                contentEl.innerHTML = `<p style="color:#FF6B5E;">${err.message}</p>`;
             }
         }
 
@@ -304,6 +383,11 @@
                 contentEl.innerHTML = `<p style="color:#FF6B5E;">${err.message}</p>`;
             }
         }
+
+        loadHome();
+        loadLineup();
+        loadBriefing();
+        loadRoster();
     </script>
 </body>
 </html>
