@@ -46,14 +46,17 @@ Manager's roster: {roster_players}
 CONFIRMED BYE WEEK CONFLICTS (computed from real 2026 NFL schedule, not a guess):
 {bye_conflicts}
 
-Give this manager 3 short, personalized insights about their team. Base insights on roster construction and depth at each position. Keep it useful and specific-sounding, not generic filler.
+CONFIRMED WEATHER FOR THIS WEEK'S GAMES (real data, only present when weather is actually a relevant factor - if empty, weather is not a concern for anyone on this roster and should not be mentioned at all):
+{weather_notes}
+
+Give this manager 3 short, personalized insights about their team. Base insights on roster construction, depth at each position, and the confirmed weather above where it applies. Keep it useful and specific-sounding, not generic filler. Only mention weather if it appears in the confirmed list above - never guess or invent weather conditions.
 
 For the lineup_warning field: if there are confirmed bye week conflicts listed above, state them directly and specifically (name the players and the week). If there are none, set lineup_warning to null. Do NOT guess at or invent bye week conflicts that are not in the confirmed list above.
 
 Respond ONLY as a JSON object in this exact shape, no other text:
 {{
   "insights": [
-    {{"text": "short insight text", "source": "short source label like 'Roster Analysis'"}},
+    {{"text": "short insight text", "source": "short source label like 'Roster Analysis' or 'Weather'"}},
     {{"text": "short insight text", "source": "short source label"}},
     {{"text": "short insight text", "source": "short source label"}}
   ],
@@ -171,7 +174,7 @@ def generate_draft_recap(league_id, draft_picks_text, league_name):
         logger.error(f"Error generating draft recap with Claude: {str(e)}")
         return f"<h2>Draft recap generation failed</h2><p>Error: {str(e)}</p>"
 
-def generate_briefing(league_id, team_id, bye_conflicts=None):
+def generate_briefing(league_id, team_id, bye_conflicts=None, weather_notes=None):
     try:
         client = anthropic.Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
 
@@ -185,12 +188,14 @@ def generate_briefing(league_id, team_id, bye_conflicts=None):
         roster_players = ", ".join(roster_list[:15]) if roster_list else "No players on roster yet"
 
         bye_conflicts_text = chr(10).join(bye_conflicts) if bye_conflicts else "None found."
+        weather_notes_text = chr(10).join(weather_notes) if weather_notes else "None found."
 
         prompt = BRIEFING_PROMPT.format(
             league_name=league.name if league else "your league",
             team_name=roster.team_name,
             roster_players=roster_players,
-            bye_conflicts=bye_conflicts_text
+            bye_conflicts=bye_conflicts_text,
+            weather_notes=weather_notes_text
         )
 
         message = client.messages.create(
@@ -236,9 +241,12 @@ LINEUP_PROMPT = """You are a fantasy football coach setting an optimal starting 
 Team: {team_name}
 Full roster: {roster_players}
 
+CONFIRMED WEATHER FOR THIS WEEK'S GAMES (real data, only present when weather is actually a relevant factor - if empty, weather is not a concern and should not affect your reasoning):
+{weather_notes}
+
 Assume a standard lineup: 1 QB, 2 RB, 2 WR, 1 TE, 1 FLEX (RB/WR/TE), 1 DST, 1 K. If the roster doesn't clearly contain enough players for a slot, leave that slot's player as null.
 
-Pick the strongest starters from the roster for each slot based on your knowledge of these players, and briefly explain your FLEX choice.
+Pick the strongest starters from the roster for each slot based on your knowledge of these players. Factor in confirmed weather above where relevant (e.g. bad weather can hurt passing games and favor run-heavy game plans). Never invent weather that isn't in the confirmed list. Briefly explain your FLEX choice.
 
 Respond ONLY as a JSON object in this exact shape, no other text:
 {{
@@ -282,7 +290,7 @@ def ai_resolve_team_for_names(names):
         logger.warning(f"AI team resolution failed: {str(e)}")
         return {}
 
-def generate_lineup_suggestion(league_id, team_id):
+def generate_lineup_suggestion(league_id, team_id, weather_notes=None):
     try:
         client = anthropic.Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
 
@@ -291,10 +299,12 @@ def generate_lineup_suggestion(league_id, team_id):
             return {"error": "No roster data yet"}
 
         roster_players = ", ".join(roster.players)
+        weather_notes_text = chr(10).join(weather_notes) if weather_notes else "None found."
 
         prompt = LINEUP_PROMPT.format(
             team_name=roster.team_name,
-            roster_players=roster_players
+            roster_players=roster_players,
+            weather_notes=weather_notes_text
         )
 
         message = client.messages.create(
