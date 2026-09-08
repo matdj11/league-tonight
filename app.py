@@ -14,11 +14,11 @@ CORS(app)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-from database import init_db, db_session, League, Recap, Briefing, User, Roster
+from database import init_db, db_session, League, Recap, Briefing, User, Roster, Matchup
 from sleeper_client import SleeperClient, build_bye_conflicts_from_team_map
 from espn_data import get_weather_by_team, build_weather_notes, get_relevant_news, build_news_notes
-from fantasypros_data import get_projected_points_for_names, build_projection_notes
-from claude_helper import generate_recap, generate_draft_recap, generate_briefing, generate_season_preview, ai_resolve_team_for_names, generate_lineup_suggestion
+from fantasypros_data import get_projected_points_for_names, build_projection_notes, get_current_nfl_week
+from claude_helper import generate_recap, generate_draft_recap, generate_briefing, generate_season_preview, ai_resolve_team_for_names, generate_lineup_suggestion, generate_matchup_preview
 
 sleeper = SleeperClient()
 
@@ -541,6 +541,117 @@ def generate_lineup_endpoint():
         })
     except Exception as e:
         logger.error(f"Lineup generation failed: {str(e)}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route('/api/league/teams', methods=['GET'])
+def get_league_teams():
+    try:
+        league_id = request.args.get('league_id')
+        exclude_team_id = request.args.get('exclude_team_id')
+        if not league_id:
+            return jsonify({"status": "error", "error": "league_id required"}), 400
+        rosters = db_session.query(Roster).filter_by(league_id=league_id).all()
+        teams = [
+            {"team_id": r.team_id, "team_name": r.team_name}
+            for r in rosters if r.team_id != exclude_team_id
+        ]
+        return jsonify({"status": "ok", "teams": teams})
+    except Exception as e:
+        logger.error(f"Get league teams failed: {str(e)}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route('/api/matchup/set-opponent', methods=['POST'])
+def set_matchup_opponent():
+    try:
+        data = request.get_json()
+        league_id = data.get('league_id')
+        team_id = data.get('team_id')
+        opponent_team_id = data.get('opponent_team_id')
+        week = data.get('week') or get_current_nfl_week()
+
+        if not league_id or not team_id or not opponent_team_id:
+            return jsonify({"status": "error", "error": "league_id, team_id, opponent_team_id required"}), 400
+
+        my_roster = db_session.query(Roster).filter_by(league_id=league_id, team_id=team_id).first()
+        opp_roster = db_session.query(Roster).filter_by(league_id=league_id, team_id=opponent_team_id).first()
+        if not my_roster or not opp_roster:
+            return jsonify({"status": "error", "error": "team not found"}), 404
+
+        week = int(week)
+
+        existing = db_session.query(Matchup).filter_by(league_id=league_id, week=week).filter(
+            ((Matchup.team_1_id == team_id) & (Matchup.team_2_id == opponent_team_id)) |
+            ((Matchup.team_1_id == opponent_team_id) & (Matchup.team_2_id == team_id))
+        ).first()
+
+        if existing:
+            existing.team_1_id = team_id
+            existing.team_1_name = my_roster.team_name
+            existing.team_2_id = opponent_team_id
+            existing.team_2_name = opp_roster.team_name
+        else:
+            new_matchup = Matchup(
+                id=str(uuid.uuid4()),
+                league_id=league_id,
+                week=week,
+                team_1_id=team_id,
+                team_1_name=my_roster.team_name,
+                team_2_id=opponent_team_id,
+                team_2_name=opp_roster.team_name
+            )
+            db_session.add(new_matchup)
+
+        db_session.commit()
+        return jsonify({"status": "saved", "week": week})
+    except Exception as e:
+        logger.error(f"Set matchup opponent failed: {str(e)}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route('/api/matchup/current', methods=['GET'])
+def get_current_matchup():
+    try:
+        league_id = request.args.get('league_id')
+        team_id = request.args.get('team_id')
+        week_param = request.args.get('week')
+
+        if not league_id or not team_id:
+            return jsonify({"status": "error", "error": "league_id and team_id required"}), 400
+
+        week = int(week_param) if week_param else get_current_nfl_week()
+
+        matchup = db_session.query(Matchup).filter_by(league_id=league_id, week=week).filter(
+            (Matchup.team_1_id == team_id) | (Matchup.team_2_id == team_id)
+        ).first()
+
+        if not matchup:
+            return jsonify({"status": "not_set", "week": week})
+
+        if matchup.team_1_id == team_id:
+            opponent_id = matchup.team_2_id
+            opponent_name = matchup.team_2_name
+        else:
+            opponent_id = matchup.team_1_id
+            opponent_name = matchup.team_1_name
+
+        my_roster = db_session.query(Roster).filter_by(league_id=league_id, team_id=team_id).first()
+        opp_roster = db_session.query(Roster).filter_by(league_id=league_id, team_id=opponent_id).first()
+
+        preview = generate_matchup_preview(
+            my_roster.team_name if my_roster else "Your team",
+            (my_roster.players or []) if my_roster else [],
+            opponent_name,
+            (opp_roster.players or []) if opp_roster else []
+        )
+
+        return jsonify({
+            "status": "ok",
+            "week": week,
+            "opponent_name": opponent_name,
+            "opponent_team_id": opponent_id,
+            "preview": preview
+        })
+    except Exception as e:
+        logger.error(f"Get current matchup failed: {str(e)}")
         return jsonify({"status": "error", "error": str(e)}), 500
 
 @app.route('/api/roster/full', methods=['GET'])
