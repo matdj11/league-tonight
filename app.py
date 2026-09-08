@@ -15,8 +15,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 from database import init_db, db_session, League, Recap, Briefing, User, Roster
-from sleeper_client import SleeperClient
-from claude_helper import generate_recap, generate_draft_recap, generate_briefing, generate_season_preview
+from sleeper_client import SleeperClient, build_bye_conflicts_from_team_map
+from claude_helper import generate_recap, generate_draft_recap, generate_briefing, generate_season_preview, ai_resolve_team_for_names, generate_lineup_suggestion
 
 sleeper = SleeperClient()
 
@@ -436,7 +436,18 @@ def generate_briefing_endpoint():
         if not roster:
             return jsonify({"status": "roster not found"}), 404
 
-        briefing_data = generate_briefing(league_id, team_id)
+        bye_conflicts = []
+        try:
+            if roster.players:
+                resolved, unresolved = sleeper.resolve_teams_for_names(roster.players)
+                if unresolved:
+                    ai_resolved = ai_resolve_team_for_names(unresolved)
+                    resolved.update(ai_resolved)
+                bye_conflicts = build_bye_conflicts_from_team_map(resolved)
+        except Exception as e:
+            logger.warning(f"Bye conflict lookup failed: {str(e)}")
+
+        briefing_data = generate_briefing(league_id, team_id, bye_conflicts=bye_conflicts)
 
         briefing = Briefing(
             id=str(uuid.uuid4()),
@@ -474,6 +485,27 @@ def generate_season_preview_endpoint():
         })
     except Exception as e:
         logger.error(f"Season preview generation failed: {str(e)}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route('/api/lineup/generate', methods=['POST', 'GET'])
+def generate_lineup_endpoint():
+    try:
+        league_id = request.args.get('league_id')
+        team_id = request.args.get('team_id')
+
+        if not league_id or not team_id:
+            return jsonify({"status": "error", "error": "league_id and team_id required"}), 400
+
+        lineup_data = generate_lineup_suggestion(league_id, team_id)
+
+        return jsonify({
+            "status": "generated",
+            "league_id": league_id,
+            "team_id": team_id,
+            "lineup": lineup_data
+        })
+    except Exception as e:
+        logger.error(f"Lineup generation failed: {str(e)}")
         return jsonify({"status": "error", "error": str(e)}), 500
 
 @app.route('/api/stakes', methods=['GET'])
