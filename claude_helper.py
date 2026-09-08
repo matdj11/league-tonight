@@ -41,9 +41,14 @@ Respond in HTML format using <h2> for section headers and <p> for text. Do not i
 BRIEFING_PROMPT = """You are a personal fantasy football coach giving a quick morning briefing to one manager in the league "{league_name}".
 
 Manager's team: {team_name}
-Manager's roster (player IDs): {roster_players}
+Manager's roster: {roster_players}
 
-Give this manager 3 short, personalized insights about their team this week. Since we don't have live injury/news data yet, base insights on general roster construction (bye weeks unknown, depth at each position, etc.) and keep it useful and specific-sounding, not generic filler.
+CONFIRMED BYE WEEK CONFLICTS (computed from real 2026 NFL schedule, not a guess):
+{bye_conflicts}
+
+Give this manager 3 short, personalized insights about their team. Base insights on roster construction and depth at each position. Keep it useful and specific-sounding, not generic filler.
+
+For the lineup_warning field: if there are confirmed bye week conflicts listed above, state them directly and specifically (name the players and the week). If there are none, set lineup_warning to null. Do NOT guess at or invent bye week conflicts that are not in the confirmed list above.
 
 Respond ONLY as a JSON object in this exact shape, no other text:
 {{
@@ -52,7 +57,7 @@ Respond ONLY as a JSON object in this exact shape, no other text:
     {{"text": "short insight text", "source": "short source label"}},
     {{"text": "short insight text", "source": "short source label"}}
   ],
-  "lineup_warning": "one short sentence flagging something to double check, or null"
+  "lineup_warning": "specific sentence naming the players and bye week if a confirmed conflict exists, otherwise null"
 }}"""
 
 SEASON_PREVIEW_PROMPT = """You are a sports analyst creating a season preview for a fantasy football league called "{league_name}" before games have started.
@@ -149,7 +154,7 @@ def generate_draft_recap(league_id, draft_picks_text, league_name):
         logger.error(f"Error generating draft recap with Claude: {str(e)}")
         return f"<h2>Draft recap generation failed</h2><p>Error: {str(e)}</p>"
 
-def generate_briefing(league_id, team_id):
+def generate_briefing(league_id, team_id, bye_conflicts=None):
     try:
         client = anthropic.Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
 
@@ -159,12 +164,16 @@ def generate_briefing(league_id, team_id):
         if not roster:
             return {"insights": [], "lineup_warning": "No roster found for this team."}
 
-        roster_players = ", ".join(roster.players[:10]) if roster.players else "No players on roster yet"
+        roster_list = roster.players if roster.players else []
+        roster_players = ", ".join(roster_list[:15]) if roster_list else "No players on roster yet"
+
+        bye_conflicts_text = chr(10).join(bye_conflicts) if bye_conflicts else "None found."
 
         prompt = BRIEFING_PROMPT.format(
             league_name=league.name if league else "your league",
             team_name=roster.team_name,
-            roster_players=roster_players
+            roster_players=roster_players,
+            bye_conflicts=bye_conflicts_text
         )
 
         message = client.messages.create(
@@ -191,6 +200,107 @@ def generate_briefing(league_id, team_id):
     except Exception as e:
         logger.error(f"Error generating briefing with Claude: {str(e)}")
         return {"insights": [{"text": f"Briefing generation failed: {str(e)}", "source": "Error"}], "lineup_warning": None}
+
+TEAM_LOOKUP_PROMPT = """You are an NFL roster expert. For each player name listed below, identify their current 2026 NFL team using the standard 2-3 letter abbreviation (e.g. SF, KC, NYJ, GB).
+
+Player names:
+{names}
+
+Respond ONLY as a JSON object mapping each exact player name (as given) to their team abbreviation. If you are not confident about a player, map them to null. No other text.
+
+Example format:
+{{
+  "Christian McCaffrey": "SF",
+  "Some Unknown Player": null
+}}"""
+
+LINEUP_PROMPT = """You are a fantasy football coach setting an optimal starting lineup for this week.
+
+Team: {team_name}
+Full roster: {roster_players}
+
+Assume a standard lineup: 1 QB, 2 RB, 2 WR, 1 TE, 1 FLEX (RB/WR/TE), 1 DST, 1 K. If the roster doesn't clearly contain enough players for a slot, leave that slot's player as null.
+
+Pick the strongest starters from the roster for each slot based on your knowledge of these players, and briefly explain your FLEX choice.
+
+Respond ONLY as a JSON object in this exact shape, no other text:
+{{
+  "lineup": [
+    {{"slot": "QB", "player": "player name or null"}},
+    {{"slot": "RB", "player": "player name or null"}},
+    {{"slot": "RB", "player": "player name or null"}},
+    {{"slot": "WR", "player": "player name or null"}},
+    {{"slot": "WR", "player": "player name or null"}},
+    {{"slot": "TE", "player": "player name or null"}},
+    {{"slot": "FLEX", "player": "player name or null"}},
+    {{"slot": "DST", "player": "player name or null"}},
+    {{"slot": "K", "player": "player name or null"}}
+  ],
+  "flex_reasoning": "one short sentence on why that FLEX pick"
+}}"""
+
+def ai_resolve_team_for_names(names):
+    """Ask Claude to identify NFL teams for player names Sleeper's database
+    couldn't match (nicknames, typos, etc). Returns dict name->team or {}."""
+    if not names:
+        return {}
+    try:
+        client = anthropic.Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
+
+        prompt = TEAM_LOOKUP_PROMPT.format(names=", ".join(names))
+
+        message = client.messages.create(
+            model="claude-sonnet-5",
+            max_tokens=512,
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+
+        raw_text = _extract_text(message)
+        result = json.loads(raw_text)
+        return {k: v for k, v in result.items() if v}
+
+    except Exception as e:
+        logger.warning(f"AI team resolution failed: {str(e)}")
+        return {}
+
+def generate_lineup_suggestion(league_id, team_id):
+    try:
+        client = anthropic.Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
+
+        roster = db_session.query(Roster).filter_by(league_id=league_id, team_id=team_id).first()
+        if not roster or not roster.players:
+            return {"error": "No roster data yet"}
+
+        roster_players = ", ".join(roster.players)
+
+        prompt = LINEUP_PROMPT.format(
+            team_name=roster.team_name,
+            roster_players=roster_players
+        )
+
+        message = client.messages.create(
+            model="claude-sonnet-5",
+            max_tokens=768,
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+
+        raw_text = _extract_text(message)
+
+        try:
+            lineup_data = json.loads(raw_text)
+        except Exception:
+            lineup_data = {"lineup": [], "flex_reasoning": raw_text}
+
+        logger.info(f"Generated Claude lineup suggestion for team {team_id} in league {league_id}")
+        return lineup_data
+
+    except Exception as e:
+        logger.error(f"Error generating lineup suggestion with Claude: {str(e)}")
+        return {"error": str(e)}
 
 def generate_season_preview(league_id):
     try:
