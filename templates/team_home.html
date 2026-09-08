@@ -153,6 +153,10 @@
                 loadStakes();
                 loadedTabs.stakes = true;
             }
+            if (name === 'briefing' && !loadedTabs.briefing) {
+    loadBriefing();
+    loadedTabs.briefing = true;
+            }
         }
 
         function toggleReason(id) {
@@ -386,7 +390,6 @@
 
         loadHome();
         loadLineup();
-        loadBriefing();
         loadRoster();
     </script>
 </body>
