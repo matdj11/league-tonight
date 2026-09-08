@@ -46,22 +46,36 @@ Manager's roster: {roster_players}
 CONFIRMED BYE WEEK CONFLICTS (computed from real 2026 NFL schedule, not a guess):
 {bye_conflicts}
 
-CONFIRMED WEATHER FOR THIS WEEK'S GAMES (real data, only present when weather is actually a relevant factor - if empty, weather is not a concern for anyone on this roster and should not be mentioned at all):
+CONFIRMED PROJECTED POINTS (real data from FantasyPros, only present for players it has projections for - never invent a number for a player not listed here):
+{projection_notes}
+
+CONFIRMED WEATHER FOR THIS WEEK'S GAMES (real data, only present when weather is actually a relevant factor - if empty, there is no weather concern for anyone on this roster):
 {weather_notes}
 
 RECENT NEWS RELEVANT TO THIS ROSTER (real headlines pulled live, only present when a player on this roster is actually mentioned - if empty, there is no relevant news right now):
 {news_notes}
 
-Give this manager 3 short, personalized insights about their team, prioritizing any real news above (injuries, roster moves, etc.) first if present, then roster construction, depth at each position, and confirmed weather where it applies. Keep it useful and specific-sounding, not generic filler. Only mention weather or news if they appear in the confirmed sections above - never guess or invent either.
+Build a briefing with three sections:
 
-For the lineup_warning field: if there are confirmed bye week conflicts listed above, state them directly and specifically (name the players and the week). If there are none, set lineup_warning to null. Do NOT guess at or invent bye week conflicts that are not in the confirmed list above.
+1. "roster_analysis": 1-2 short insights about roster construction, depth at each position, and projected points where relevant (reference actual confirmed projections above when useful, e.g. flagging a low-projected starter or a bench player worth watching). You may note in general terms if a position looks thin and worth checking the waiver wire, but do NOT invent specific waiver-wire player names since you don't have that data.
+
+2. "weather": up to 2 short items ONLY if the confirmed weather section above is non-empty. If it's empty, return an empty array - do not guess or invent weather.
+
+3. "news": up to 2 short items ONLY if the confirmed news section above is non-empty. If it's empty, return an empty array - do not guess or invent news.
+
+For the lineup_warning field: if there are confirmed bye week conflicts listed above, state them directly and specifically (name the players and the week). If there are none, set lineup_warning to null.
 
 Respond ONLY as a JSON object in this exact shape, no other text:
 {{
-  "insights": [
-    {{"text": "short insight text", "source": "short source label like 'Roster Analysis' or 'Weather'"}},
-    {{"text": "short insight text", "source": "short source label"}},
-    {{"text": "short insight text", "source": "short source label"}}
+  "roster_analysis": [
+    {{"text": "short insight text"}},
+    {{"text": "short insight text"}}
+  ],
+  "weather": [
+    {{"text": "short weather-based insight, only if confirmed weather exists"}}
+  ],
+  "news": [
+    {{"text": "short news-based insight, only if confirmed news exists"}}
   ],
   "lineup_warning": "specific sentence naming the players and bye week if a confirmed conflict exists, otherwise null"
 }}"""
@@ -177,7 +191,7 @@ def generate_draft_recap(league_id, draft_picks_text, league_name):
         logger.error(f"Error generating draft recap with Claude: {str(e)}")
         return f"<h2>Draft recap generation failed</h2><p>Error: {str(e)}</p>"
 
-def generate_briefing(league_id, team_id, bye_conflicts=None, weather_notes=None, news_notes=None):
+def generate_briefing(league_id, team_id, bye_conflicts=None, weather_notes=None, news_notes=None, projection_notes=None):
     try:
         client = anthropic.Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
 
@@ -185,7 +199,7 @@ def generate_briefing(league_id, team_id, bye_conflicts=None, weather_notes=None
         roster = db_session.query(Roster).filter_by(league_id=league_id, team_id=team_id).first()
 
         if not roster:
-            return {"insights": [], "lineup_warning": "No roster found for this team."}
+            return {"roster_analysis": [], "weather": [], "news": [], "lineup_warning": "No roster found for this team."}
 
         roster_list = roster.players if roster.players else []
         roster_players = ", ".join(roster_list[:15]) if roster_list else "No players on roster yet"
@@ -193,6 +207,7 @@ def generate_briefing(league_id, team_id, bye_conflicts=None, weather_notes=None
         bye_conflicts_text = chr(10).join(bye_conflicts) if bye_conflicts else "None found."
         weather_notes_text = chr(10).join(weather_notes) if weather_notes else "None found."
         news_notes_text = chr(10).join(news_notes) if news_notes else "None found."
+        projection_notes_text = chr(10).join(projection_notes) if projection_notes else "None found."
 
         prompt = BRIEFING_PROMPT.format(
             league_name=league.name if league else "your league",
@@ -200,12 +215,13 @@ def generate_briefing(league_id, team_id, bye_conflicts=None, weather_notes=None
             roster_players=roster_players,
             bye_conflicts=bye_conflicts_text,
             weather_notes=weather_notes_text,
-            news_notes=news_notes_text
+            news_notes=news_notes_text,
+            projection_notes=projection_notes_text
         )
 
         message = client.messages.create(
             model="claude-sonnet-5",
-            max_tokens=1024,
+            max_tokens=1536,
             messages=[
                 {"role": "user", "content": prompt}
             ]
@@ -215,7 +231,9 @@ def generate_briefing(league_id, team_id, bye_conflicts=None, weather_notes=None
 
         def _briefing_fallback(text):
             return {
-                "insights": [{"text": "Briefing couldn't be parsed this time. Try generating again.", "source": "System"}],
+                "roster_analysis": [{"text": "Briefing couldn't be parsed this time. Try generating again."}],
+                "weather": [],
+                "news": [],
                 "lineup_warning": None
             }
 
@@ -226,7 +244,7 @@ def generate_briefing(league_id, team_id, bye_conflicts=None, weather_notes=None
 
     except Exception as e:
         logger.error(f"Error generating briefing with Claude: {str(e)}")
-        return {"insights": [{"text": f"Briefing generation failed: {str(e)}", "source": "Error"}], "lineup_warning": None}
+        return {"roster_analysis": [{"text": f"Briefing generation failed: {str(e)}"}], "weather": [], "news": [], "lineup_warning": None}
 
 TEAM_LOOKUP_PROMPT = """You are an NFL roster expert. For each player name listed below, identify their current 2026 NFL team using the standard 2-3 letter abbreviation (e.g. SF, KC, NYJ, GB).
 
@@ -245,6 +263,9 @@ LINEUP_PROMPT = """You are a fantasy football coach setting an optimal starting 
 
 Team: {team_name}
 Full roster: {roster_players}
+
+CONFIRMED PROJECTED POINTS (real data from FantasyPros, only present for players it has projections for - never invent a number for a player not listed here):
+{projection_notes}
 
 CONFIRMED WEATHER FOR THIS WEEK'S GAMES (real data, only present when weather is actually a relevant factor - if empty, weather is not a concern and should not affect your reasoning):
 {weather_notes}
@@ -300,7 +321,7 @@ def ai_resolve_team_for_names(names):
         logger.warning(f"AI team resolution failed: {str(e)}")
         return {}
 
-def generate_lineup_suggestion(league_id, team_id, weather_notes=None, news_notes=None):
+def generate_lineup_suggestion(league_id, team_id, weather_notes=None, news_notes=None, projection_notes=None):
     try:
         client = anthropic.Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
 
@@ -311,12 +332,14 @@ def generate_lineup_suggestion(league_id, team_id, weather_notes=None, news_note
         roster_players = ", ".join(roster.players)
         weather_notes_text = chr(10).join(weather_notes) if weather_notes else "None found."
         news_notes_text = chr(10).join(news_notes) if news_notes else "None found."
+        projection_notes_text = chr(10).join(projection_notes) if projection_notes else "None found."
 
         prompt = LINEUP_PROMPT.format(
             team_name=roster.team_name,
             roster_players=roster_players,
             weather_notes=weather_notes_text,
-            news_notes=news_notes_text
+            news_notes=news_notes_text,
+            projection_notes=projection_notes_text
         )
 
         message = client.messages.create(
