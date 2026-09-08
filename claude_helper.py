@@ -364,6 +364,60 @@ def generate_lineup_suggestion(league_id, team_id, weather_notes=None, news_note
         logger.error(f"Error generating lineup suggestion with Claude: {str(e)}")
         return {"error": str(e)}
 
+MATCHUP_PROMPT = """You are a fantasy football analyst previewing a head-to-head matchup.
+
+Team A: {team_a_name}
+Team A roster: {team_a_players}
+
+Team B (opponent): {team_b_name}
+Team B roster: {team_b_players}
+
+Compare the two rosters and give:
+1. "strengths": 1-2 short points on where Team A has the advantage over Team B
+2. "weaknesses": 1-2 short points on where Team A is at a disadvantage against Team B
+3. "outlook": one short overall projected outlook sentence for Team A this matchup
+
+Base this on roster construction, depth, and your knowledge of the players. Keep it fun but grounded, like a sports analyst breaking down the matchup.
+
+Respond ONLY as a JSON object in this exact shape, no other text:
+{{
+  "strengths": [{{"text": "short point"}}],
+  "weaknesses": [{{"text": "short point"}}],
+  "outlook": "one short sentence"
+}}"""
+
+def generate_matchup_preview(team_a_name, team_a_players, team_b_name, team_b_players):
+    try:
+        client = anthropic.Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
+
+        prompt = MATCHUP_PROMPT.format(
+            team_a_name=team_a_name,
+            team_a_players=", ".join(team_a_players[:15]) if team_a_players else "No roster data",
+            team_b_name=team_b_name,
+            team_b_players=", ".join(team_b_players[:15]) if team_b_players else "No roster data"
+        )
+
+        message = client.messages.create(
+            model="claude-sonnet-5",
+            max_tokens=1024,
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+
+        raw_text = _extract_text(message)
+
+        def _matchup_fallback(text):
+            return {"strengths": [], "weaknesses": [], "outlook": "Matchup preview couldn't be parsed this time."}
+
+        matchup_data = _parse_json_safely(raw_text, _matchup_fallback)
+        logger.info(f"Generated Claude matchup preview: {team_a_name} vs {team_b_name}")
+        return matchup_data
+
+    except Exception as e:
+        logger.error(f"Error generating matchup preview with Claude: {str(e)}")
+        return {"strengths": [], "weaknesses": [], "outlook": f"Failed: {str(e)}"}
+
 def generate_season_preview(league_id):
     try:
         client = anthropic.Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
