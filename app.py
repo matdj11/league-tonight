@@ -4,6 +4,7 @@ import os
 from dotenv import load_dotenv
 import logging
 import uuid
+import random
 
 load_dotenv()
 
@@ -18,6 +19,9 @@ from sleeper_client import SleeperClient
 from claude_helper import generate_recap, generate_draft_recap, generate_briefing
 
 sleeper = SleeperClient()
+
+def generate_pin(length):
+    return ''.join([str(random.randint(0, 9)) for _ in range(length)])
 
 @app.route('/')
 def index():
@@ -84,6 +88,10 @@ def manual_league_setup():
         league_id = data.get('league_id')
         league_name = data.get('league_name')
         teams = data.get('teams', [])
+        prize_pool = data.get('prize_pool', 0)
+        first_place_amount = data.get('first_place_amount', 0)
+        second_place_amount = data.get('second_place_amount', 0)
+        third_place_amount = data.get('third_place_amount', 0)
 
         if not league_id or not league_name:
             return jsonify({"status": "error", "error": "league_id and league_name required"}), 400
@@ -92,17 +100,30 @@ def manual_league_setup():
             return jsonify({"status": "error", "error": "at least one team required"}), 400
 
         league = db_session.query(League).filter_by(league_id=league_id).first()
+        is_new = False
         if not league:
+            is_new = True
             league = League(
                 id=str(uuid.uuid4()),
                 league_id=league_id,
                 name=league_name,
                 platform='espn_manual',
-                settings={}
+                settings={},
+                league_pin=generate_pin(6),
+                prize_pool=prize_pool,
+                first_place_amount=first_place_amount,
+                second_place_amount=second_place_amount,
+                third_place_amount=third_place_amount
             )
             db_session.add(league)
         else:
             league.name = league_name
+            league.prize_pool = prize_pool
+            league.first_place_amount = first_place_amount
+            league.second_place_amount = second_place_amount
+            league.third_place_amount = third_place_amount
+            if not league.league_pin:
+                league.league_pin = generate_pin(6)
         db_session.commit()
 
         for idx, team in enumerate(teams):
@@ -135,7 +156,12 @@ def manual_league_setup():
 
         db_session.commit()
 
-        return jsonify({"status": "saved", "league_id": league_id, "teams": len(teams)})
+        return jsonify({
+            "status": "saved",
+            "league_id": league_id,
+            "teams": len(teams),
+            "league_pin": league.league_pin
+        })
     except Exception as e:
         logger.error(f"Manual league setup failed: {str(e)}")
         return jsonify({"status": "error", "error": str(e)}), 500
