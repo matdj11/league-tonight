@@ -166,6 +166,109 @@ def manual_league_setup():
         logger.error(f"Manual league setup failed: {str(e)}")
         return jsonify({"status": "error", "error": str(e)}), 500
 
+@app.route('/join')
+def join_page():
+    return render_template('join.html')
+
+@app.route('/login')
+def login_page():
+    return render_template('login.html')
+
+@app.route('/api/league/find-by-pin', methods=['POST'])
+def find_league_by_pin():
+    try:
+        data = request.get_json()
+        league_pin = data.get('league_pin', '').strip()
+
+        if not league_pin:
+            return jsonify({"status": "error", "error": "league_pin required"}), 400
+
+        league = db_session.query(League).filter_by(league_pin=league_pin).first()
+        if not league:
+            return jsonify({"status": "error", "error": "No league found with that PIN"}), 404
+
+        rosters = db_session.query(Roster).filter_by(league_id=league.league_id).all()
+        teams = [
+            {"team_id": r.team_id, "team_name": r.team_name, "claimed": bool(r.claimed)}
+            for r in rosters
+        ]
+
+        return jsonify({
+            "status": "found",
+            "league_id": league.league_id,
+            "league_name": league.name,
+            "teams": teams
+        })
+    except Exception as e:
+        logger.error(f"Find league by pin failed: {str(e)}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route('/api/team/claim-with-pin', methods=['POST'])
+def claim_team_with_pin():
+    try:
+        data = request.get_json()
+        league_id = data.get('league_id')
+        team_id = data.get('team_id')
+        team_pin = data.get('team_pin', '').strip()
+
+        if not league_id or not team_id or not team_pin:
+            return jsonify({"status": "error", "error": "league_id, team_id, and team_pin required"}), 400
+
+        if len(team_pin) != 4 or not team_pin.isdigit():
+            return jsonify({"status": "error", "error": "team_pin must be exactly 4 digits"}), 400
+
+        roster = db_session.query(Roster).filter_by(league_id=league_id, team_id=team_id).first()
+        if not roster:
+            return jsonify({"status": "error", "error": "Team not found"}), 404
+
+        if roster.claimed:
+            return jsonify({"status": "error", "error": "This team has already been claimed"}), 400
+
+        roster.team_pin = team_pin
+        roster.claimed = True
+        db_session.commit()
+
+        return jsonify({
+            "status": "claimed",
+            "league_id": league_id,
+            "team_id": team_id,
+            "team_name": roster.team_name
+        })
+    except Exception as e:
+        logger.error(f"Claim team with pin failed: {str(e)}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route('/api/team/login-with-pin', methods=['POST'])
+def login_team_with_pin():
+    try:
+        data = request.get_json()
+        league_pin = data.get('league_pin', '').strip()
+        team_pin = data.get('team_pin', '').strip()
+
+        if not league_pin or not team_pin:
+            return jsonify({"status": "error", "error": "league_pin and team_pin required"}), 400
+
+        league = db_session.query(League).filter_by(league_pin=league_pin).first()
+        if not league:
+            return jsonify({"status": "error", "error": "No league found with that PIN"}), 404
+
+        roster = db_session.query(Roster).filter_by(
+            league_id=league.league_id, team_pin=team_pin, claimed=True
+        ).first()
+        if not roster:
+            return jsonify({"status": "error", "error": "Incorrect team PIN"}), 404
+
+        return jsonify({
+            "status": "logged in",
+            "league_id": league.league_id,
+            "league_name": league.name,
+            "team_id": roster.team_id,
+            "team_name": roster.team_name
+        })
+    except Exception as e:
+        logger.error(f"Login with pin failed: {str(e)}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
 @app.route('/api/recap/generate', methods=['POST', 'GET'])
 def generate_recap_endpoint():
     try:
@@ -325,6 +428,26 @@ def generate_briefing_endpoint():
     except Exception as e:
         logger.error(f"Briefing generation failed: {str(e)}")
         return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route('/team-home')
+def team_home():
+    try:
+        league_id = request.args.get('league_id')
+        team_id = request.args.get('team_id')
+
+        if not league_id or not team_id:
+            return "league_id and team_id required", 400
+
+        league = db_session.query(League).filter_by(league_id=league_id).first()
+        roster = db_session.query(Roster).filter_by(league_id=league_id, team_id=team_id).first()
+
+        if not league or not roster:
+            return "League or team not found", 404
+
+        return f"<div style='font-family:sans-serif;background:#0B0F17;color:#F5F3EE;padding:40px;'><h1>{roster.team_name}</h1><p>{league.name}</p><p>Team home page coming in Phase 3 (tabs: Home / Briefing / Recaps / Stakes).</p></div>"
+    except Exception as e:
+        logger.error(f"Team home error: {str(e)}")
+        return f"Error: {str(e)}", 500
 
 @app.route('/dashboard')
 def dashboard():
