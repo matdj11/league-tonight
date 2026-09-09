@@ -603,6 +603,122 @@ def generate_ask_response(league_id, team_id, question, bye_conflicts=None, weat
         logger.error(f"Error generating ask response with Claude: {str(e)}")
         return f"Something went wrong answering that: {str(e)}"
 
+PODCAST_SCRIPT_PROMPT = """You are writing a short, fun, natural-sounding two-host podcast script recapping a fantasy football team's weekly briefing. The hosts are energetic and a little funny, riffing off each other like real sports radio hosts - not reading a report out loud.
+
+Team: {team_name}
+League: {league_name}
+
+Briefing content to cover:
+Roster Analysis: {roster_analysis}
+Weather: {weather}
+News: {news}
+Lineup Warning: {lineup_warning}
+
+Write a natural back-and-forth script between two hosts named Jordan and Casey. Include interruptions, reactions, and banter - not just alternating monologues. Cover all the real information above but make it entertaining. Keep it to about 8-14 lines total, each line short (1-3 sentences). If a section (weather/news) has nothing to cover, don't force a joke about it - just skip it naturally.
+
+Respond ONLY as a JSON object in this exact shape, no other text:
+{{
+  "script": [
+    {{"speaker": "Jordan", "line": "..."}},
+    {{"speaker": "Casey", "line": "..."}}
+  ]
+}}"""
+
+def generate_podcast_script(league_name, team_name, briefing_content):
+    try:
+        client = anthropic.Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
+
+        roster_analysis = briefing_content.get("roster_analysis", []) if briefing_content else []
+        weather = briefing_content.get("weather", []) if briefing_content else []
+        news = briefing_content.get("news", []) if briefing_content else []
+        lineup_warning = briefing_content.get("lineup_warning") if briefing_content else None
+
+        prompt = PODCAST_SCRIPT_PROMPT.format(
+            league_name=league_name,
+            team_name=team_name,
+            roster_analysis="; ".join([r.get("text", "") for r in roster_analysis]) if roster_analysis else "None",
+            weather="; ".join([w.get("text", "") for w in weather]) if weather else "None",
+            news="; ".join([n.get("text", "") for n in news]) if news else "None",
+            lineup_warning=lineup_warning if lineup_warning else "None"
+        )
+
+        message = client.messages.create(
+            model="claude-sonnet-5",
+            max_tokens=1536,
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+
+        raw_text = _extract_text(message)
+
+        def _podcast_fallback(text):
+            return {"script": [{"speaker": "Jordan", "line": "We couldn't put the show together this time - try again in a bit."}]}
+
+        script_data = _parse_json_safely(raw_text, _podcast_fallback)
+        logger.info(f"Generated podcast script for {team_name}")
+        return script_data
+
+    except Exception as e:
+        logger.error(f"Error generating podcast script with Claude: {str(e)}")
+        return {"script": [{"speaker": "Jordan", "line": f"Something went wrong: {str(e)}"}]}
+
+import re as _re
+
+def _strip_html(html_text):
+    return _re.sub(r"<[^<]+?>", " ", html_text or "").strip()
+
+RECAP_PODCAST_PROMPT = """You are writing a short, fun, natural-sounding two-host podcast script recapping this week's fantasy football league recap. The hosts are energetic and a little funny, riffing off each other like real sports radio hosts - not reading a report out loud.
+
+League: {league_name}
+Week: {week}
+
+Recap content to cover:
+{recap_text}
+
+Write a natural back-and-forth script between two hosts named Jordan and Casey. Include interruptions, reactions, and banter - not just alternating monologues. Cover the real content above but make it entertaining. Keep it to about 8-16 lines total, each line short (1-3 sentences).
+
+Respond ONLY as a JSON object in this exact shape, no other text:
+{{
+  "script": [
+    {{"speaker": "Jordan", "line": "..."}},
+    {{"speaker": "Casey", "line": "..."}}
+  ]
+}}"""
+
+def generate_recap_podcast_script(league_name, week, recap_html):
+    try:
+        client = anthropic.Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
+
+        recap_text = _strip_html(recap_html)
+
+        prompt = RECAP_PODCAST_PROMPT.format(
+            league_name=league_name,
+            week=week,
+            recap_text=recap_text[:4000]
+        )
+
+        message = client.messages.create(
+            model="claude-sonnet-5",
+            max_tokens=2048,
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+
+        raw_text = _extract_text(message)
+
+        def _recap_podcast_fallback(text):
+            return {"script": [{"speaker": "Jordan", "line": "We couldn't put the show together this time - try again in a bit."}]}
+
+        script_data = _parse_json_safely(raw_text, _recap_podcast_fallback)
+        logger.info(f"Generated recap podcast script for {league_name} week {week}")
+        return script_data
+
+    except Exception as e:
+        logger.error(f"Error generating recap podcast script with Claude: {str(e)}")
+        return {"script": [{"speaker": "Jordan", "line": f"Something went wrong: {str(e)}"}]}
+
 def generate_season_preview(league_id):
     try:
         client = anthropic.Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
