@@ -18,7 +18,7 @@ from database import init_db, db_session, League, Recap, Briefing, User, Roster,
 from sleeper_client import SleeperClient, build_bye_conflicts_from_team_map, _normalize_name
 from espn_data import get_weather_by_team, build_weather_notes, get_relevant_news, build_news_notes
 from fantasypros_data import get_projected_points_for_names, build_projection_notes, get_current_nfl_week
-from claude_helper import generate_recap, generate_draft_recap, generate_briefing, generate_season_preview, ai_resolve_team_for_names, generate_lineup_suggestion, generate_matchup_preview, ai_resolve_player_info_for_names
+from claude_helper import generate_recap, generate_draft_recap, generate_briefing, generate_season_preview, ai_resolve_team_for_names, generate_lineup_suggestion, generate_matchup_preview, ai_resolve_player_info_for_names, generate_waiver_suggestions, generate_ask_response
 
 sleeper = SleeperClient()
 
@@ -840,6 +840,108 @@ def debug_roster_resolve():
         })
     except Exception as e:
         logger.error(f"Debug roster resolve failed: {str(e)}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route('/api/waivers/suggest', methods=['GET'])
+def get_waiver_suggestions():
+    try:
+        league_id = request.args.get('league_id')
+        team_id = request.args.get('team_id')
+        risk_level = request.args.get('risk', 'balanced')
+
+        if not league_id or not team_id:
+            return jsonify({"status": "error", "error": "league_id and team_id required"}), 400
+
+        roster = db_session.query(Roster).filter_by(league_id=league_id, team_id=team_id).first()
+        if not roster:
+            return jsonify({"status": "error", "error": "roster not found"}), 404
+
+        all_rosters = db_session.query(Roster).filter_by(league_id=league_id).all()
+        rostered_names = set()
+        for r in all_rosters:
+            for name in (r.players or []):
+                rostered_names.add(_normalize_name(name))
+
+        trending = sleeper.get_trending_adds(lookback_hours=48, limit=50)
+        available_candidates = [
+            c for c in trending if _normalize_name(c['name']) not in rostered_names
+        ][:20]
+
+        waiver_data = generate_waiver_suggestions(
+            roster.team_name,
+            roster.players or [],
+            available_candidates,
+            risk_level=risk_level
+        )
+
+        return jsonify({
+            "status": "ok",
+            "league_id": league_id,
+            "team_id": team_id,
+            "risk": risk_level,
+            "waivers": waiver_data
+        })
+    except Exception as e:
+        logger.error(f"Get waiver suggestions failed: {str(e)}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route('/api/ask', methods=['POST'])
+def ask_question():
+    try:
+        data = request.get_json()
+        league_id = data.get('league_id')
+        team_id = data.get('team_id')
+        question = data.get('question', '').strip()
+
+        if not league_id or not team_id or not question:
+            return jsonify({"status": "error", "error": "league_id, team_id, and question required"}), 400
+
+        roster = db_session.query(Roster).filter_by(league_id=league_id, team_id=team_id).first()
+        if not roster:
+            return jsonify({"status": "error", "error": "roster not found"}), 404
+
+        bye_conflicts = []
+        weather_notes = []
+        news_notes = []
+        try:
+            if roster.players:
+                resolved, unresolved = sleeper.resolve_teams_for_names(roster.players)
+                if unresolved:
+                    ai_resolved = ai_resolve_team_for_names(unresolved)
+                    resolved.update(ai_resolved)
+                bye_conflicts = build_bye_conflicts_from_team_map(resolved)
+
+                weather_by_team = get_weather_by_team()
+                weather_notes = build_weather_notes(resolved, weather_by_team)
+
+                news_items = get_relevant_news(roster.players)
+                news_notes = build_news_notes(news_items)
+        except Exception as e:
+            logger.warning(f"Context lookup failed for ask: {str(e)}")
+
+        opponent_context = None
+        try:
+            week = get_current_nfl_week()
+            matchup = db_session.query(Matchup).filter_by(league_id=league_id, week=week).filter(
+                (Matchup.team_1_id == team_id) | (Matchup.team_2_id == team_id)
+            ).first()
+            if matchup:
+                opponent_name = matchup.team_2_name if matchup.team_1_id == team_id else matchup.team_1_name
+                opponent_context = f"Playing {opponent_name} in week {week}"
+        except Exception as e:
+            logger.warning(f"Opponent lookup failed for ask: {str(e)}")
+
+        answer = generate_ask_response(
+            league_id, team_id, question,
+            bye_conflicts=bye_conflicts,
+            weather_notes=weather_notes,
+            news_notes=news_notes,
+            opponent_context=opponent_context
+        )
+
+        return jsonify({"status": "ok", "answer": answer})
+    except Exception as e:
+        logger.error(f"Ask question failed: {str(e)}")
         return jsonify({"status": "error", "error": str(e)}), 500
 
 @app.route('/api/stakes', methods=['GET'])
