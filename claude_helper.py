@@ -653,7 +653,7 @@ def generate_podcast_script(league_name, team_name, briefing_content):
         raw_text = _extract_text(message)
 
         def _podcast_fallback(text):
-            return {"script": [{"speaker": "Jordan", "line": "We couldn't put the show together this time - try again in a bit."}]}
+            return {"script": [], "error": "Couldn't parse the podcast script this time."}
 
         script_data = _parse_json_safely(raw_text, _podcast_fallback)
         logger.info(f"Generated podcast script for {team_name}")
@@ -661,7 +661,7 @@ def generate_podcast_script(league_name, team_name, briefing_content):
 
     except Exception as e:
         logger.error(f"Error generating podcast script with Claude: {str(e)}")
-        return {"script": [{"speaker": "Jordan", "line": f"Something went wrong: {str(e)}"}]}
+        return {"script": [], "error": str(e)}
 
 import re as _re
 
@@ -709,7 +709,7 @@ def generate_recap_podcast_script(league_name, week, recap_html):
         raw_text = _extract_text(message)
 
         def _recap_podcast_fallback(text):
-            return {"script": [{"speaker": "Jordan", "line": "We couldn't put the show together this time - try again in a bit."}]}
+            return {"script": [], "error": "Couldn't parse the podcast script this time."}
 
         script_data = _parse_json_safely(raw_text, _recap_podcast_fallback)
         logger.info(f"Generated recap podcast script for {league_name} week {week}")
@@ -717,7 +717,7 @@ def generate_recap_podcast_script(league_name, week, recap_html):
 
     except Exception as e:
         logger.error(f"Error generating recap podcast script with Claude: {str(e)}")
-        return {"script": [{"speaker": "Jordan", "line": f"Something went wrong: {str(e)}"}]}
+        return {"script": [], "error": str(e)}
 
 def generate_season_preview(league_id):
     try:
