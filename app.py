@@ -1226,7 +1226,11 @@ def get_recap_podcast_script():
             recap.content
         )
 
-        return jsonify({"status": "ok", "script": script_data.get("script", [])})
+        script = script_data.get("script", [])
+        if not script:
+            return jsonify({"status": "error", "error": script_data.get("error", "Couldn't generate a podcast script.")}), 500
+
+        return jsonify({"status": "ok", "script": script})
     except Exception as e:
         logger.error(f"Get recap podcast script failed: {str(e)}")
         return jsonify({"status": "error", "error": str(e)}), 500
@@ -1252,6 +1256,9 @@ def get_recap_podcast_audio():
             recap.content
         )
         script = script_data.get("script", [])
+
+        if not script:
+            return jsonify({"status": "error", "error": script_data.get("error", "Couldn't generate a podcast script.")}), 500
 
         voice_a_id, voice_b_id = pick_two_voice_ids()
         if not voice_a_id:
