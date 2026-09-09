@@ -13,7 +13,12 @@ SEASON_START = date(2026, 9, 9)
 
 _cache = None
 _cache_time = 0
-CACHE_TTL = 3600  # 1 hour
+CACHE_TTL = 6 * 3600  # 6 hours - projections don't need to refresh more often than this
+
+_last_attempt_time = 0
+RETRY_COOLDOWN = 15 * 60  # don't hammer the API again for 15 min after a failed attempt
+
+REQUEST_DELAY = 1.5  # seconds between each position's request, to avoid tripping their rate limit
 
 
 def get_current_nfl_week():
@@ -46,17 +51,32 @@ def _fetch_position_projections(position, season=2026, week=None):
 
 
 def _build_projection_map(season=2026, week=None):
-    global _cache, _cache_time
+    global _cache, _cache_time, _last_attempt_time
     now = time.time()
+
     if _cache is not None and (now - _cache_time) < CACHE_TTL:
         return _cache
+
+    if (now - _last_attempt_time) < RETRY_COOLDOWN:
+        logger.info("Skipping FantasyPros fetch, still in cooldown after a recent failure/rate limit")
+        return _cache if _cache is not None else {}
+
+    _last_attempt_time = now
 
     if week is None:
         week = get_current_nfl_week()
 
     projections = {}
-    for position in POSITIONS:
+    hit_rate_limit = False
+
+    for i, position in enumerate(POSITIONS):
+        if i > 0:
+            time.sleep(REQUEST_DELAY)
+
         players = _fetch_position_projections(position, season=season, week=week)
+        if not players:
+            hit_rate_limit = True
+
         for p in players:
             name = p.get("name")
             stats = p.get("stats", {})
@@ -66,9 +86,15 @@ def _build_projection_map(season=2026, week=None):
             if name and pts is not None:
                 projections[name.lower().strip()] = round(pts, 1)
 
-    _cache = projections
-    _cache_time = now
-    return projections
+    if projections:
+        _cache = projections
+        _cache_time = now
+    elif hit_rate_limit and _cache is not None:
+        # Keep serving the stale cache rather than nothing, since a fresh
+        # fetch failed entirely (likely rate limited)
+        logger.info("Fresh fetch failed, continuing to serve stale cached projections")
+
+    return _cache if _cache is not None else {}
 
 
 def get_projected_points_for_names(player_names, season=2026, week=None):
