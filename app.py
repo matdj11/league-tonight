@@ -1037,6 +1037,30 @@ def get_podcast_audio():
         logger.error(f"Get podcast audio failed: {str(e)}")
         return jsonify({"status": "error", "error": str(e)}), 500
 
+@app.route('/api/debug/elevenlabs', methods=['GET'])
+def debug_elevenlabs():
+    try:
+        import requests
+        api_key = os.getenv("ELEVENLABS_API_KEY")
+        if not api_key:
+            return jsonify({"status": "error", "error": "ELEVENLABS_API_KEY not set in environment"}), 400
+
+        response = requests.get(
+            "https://api.elevenlabs.io/v1/voices",
+            headers={"xi-api-key": api_key},
+            timeout=10
+        )
+
+        return jsonify({
+            "status": "ok",
+            "http_status_code": response.status_code,
+            "response_body": response.text[:2000],
+            "key_present": True,
+            "key_prefix": api_key[:6] + "..." if len(api_key) > 6 else "too short"
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
 @app.route('/api/stakes', methods=['GET'])
 def get_stakes():
     try:
