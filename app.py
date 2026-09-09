@@ -671,11 +671,35 @@ def get_current_matchup():
         my_roster = db_session.query(Roster).filter_by(league_id=league_id, team_id=team_id).first()
         opp_roster = db_session.query(Roster).filter_by(league_id=league_id, team_id=opponent_id).first()
 
+        def _format_lineup(lineup_data):
+            if not lineup_data or not lineup_data.get('lineup'):
+                return None
+            parts = []
+            for slot in lineup_data['lineup']:
+                if slot.get('player'):
+                    parts.append(f"{slot.get('slot')}: {slot.get('player')}")
+            return ", ".join(parts) if parts else None
+
+        my_lineup_text = None
+        opp_lineup_text = None
+        try:
+            my_lineup_data = generate_lineup_suggestion(league_id, team_id)
+            my_lineup_text = _format_lineup(my_lineup_data)
+        except Exception as e:
+            logger.warning(f"Could not generate own lineup for matchup: {str(e)}")
+        try:
+            opp_lineup_data = generate_lineup_suggestion(league_id, opponent_id)
+            opp_lineup_text = _format_lineup(opp_lineup_data)
+        except Exception as e:
+            logger.warning(f"Could not generate opponent lineup for matchup: {str(e)}")
+
         preview = generate_matchup_preview(
             my_roster.team_name if my_roster else "Your team",
             (my_roster.players or []) if my_roster else [],
             opponent_name,
-            (opp_roster.players or []) if opp_roster else []
+            (opp_roster.players or []) if opp_roster else [],
+            team_a_lineup=my_lineup_text,
+            team_b_lineup=opp_lineup_text
         )
 
         return jsonify({
