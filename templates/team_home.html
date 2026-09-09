@@ -177,6 +177,12 @@
             <div id="briefing-loading" class="loading">Tap below to generate your briefing</div>
             <button class="btn" id="briefing-generate-btn" onclick="loadBriefing()">Generate My Briefing</button>
             <div id="briefing-content"></div>
+
+            <div id="listen-row" style="display:none; margin-top:16px;">
+                <button class="btn" id="listen-btn" onclick="listenToBriefing()">🎙 Listen</button>
+                <button class="btn" id="stop-listen-btn" onclick="stopPodcast()" style="display:none; margin-left:8px; background:#2A3245; color:#F5F3EE;">⏹ Stop</button>
+                <div id="listen-status" style="margin-top:10px; font-size:13px; color:#8B93A7; line-height:1.5;"></div>
+            </div>
         </div>
 
         <div id="tab-recaps" class="tab-content">
@@ -592,10 +598,155 @@
                 }
 
                 contentEl.innerHTML = html;
+                document.getElementById('listen-row').style.display = 'block';
             } catch (err) {
                 loadingEl.textContent = err.message;
                 btn.disabled = false;
             }
+        }
+
+        let podcastVoices = {};
+        let podcastQueue = [];
+        let podcastIndex = 0;
+
+        function loadVoices() {
+            return new Promise(resolve => {
+                let voices = speechSynthesis.getVoices();
+                if (voices.length) {
+                    resolve(voices);
+                } else {
+                    speechSynthesis.onvoiceschanged = () => resolve(speechSynthesis.getVoices());
+                }
+            });
+        }
+
+        async function pickTwoVoices() {
+            const voices = await loadVoices();
+            const englishVoices = voices.filter(v => v.lang.startsWith('en'));
+            const pool = englishVoices.length >= 2 ? englishVoices : voices;
+            const voiceA = pool[0];
+            const voiceB = pool.find(v => v.name !== voiceA.name) || pool[Math.min(1, pool.length - 1)];
+            return [voiceA, voiceB];
+        }
+
+        let currentAudio = null;
+        let podcastStopped = false;
+
+        async function listenToBriefing() {
+            const btn = document.getElementById('listen-btn');
+            const stopBtn = document.getElementById('stop-listen-btn');
+            const statusEl = document.getElementById('listen-status');
+            btn.disabled = true;
+            podcastStopped = false;
+            statusEl.textContent = 'Putting the show together...';
+
+            try {
+                const res = await fetch(`/api/briefing/podcast-audio?league_id=${leagueId}&team_id=${teamId}`);
+                const data = await res.json();
+                if (data.status !== 'ok') throw new Error(data.error || 'ElevenLabs unavailable');
+
+                podcastQueue = data.lines || [];
+                if (podcastQueue.length === 0) throw new Error('No audio generated.');
+
+                podcastIndex = 0;
+                stopBtn.style.display = 'inline-block';
+                playNextAudioLine();
+            } catch (err) {
+                console.warn('ElevenLabs audio failed, falling back to browser voices:', err.message);
+                statusEl.textContent = 'Using browser voices instead...';
+                listenToBriefingBrowserFallback();
+            }
+        }
+
+        function playNextAudioLine() {
+            const statusEl = document.getElementById('listen-status');
+            if (podcastStopped) return;
+            if (podcastIndex >= podcastQueue.length) {
+                document.getElementById('listen-btn').disabled = false;
+                document.getElementById('stop-listen-btn').style.display = 'none';
+                statusEl.textContent = 'Done!';
+                return;
+            }
+            const line = podcastQueue[podcastIndex];
+            statusEl.textContent = `${line.speaker}: ${line.line}`;
+
+            if (!line.audio_base64) {
+                podcastIndex++;
+                playNextAudioLine();
+                return;
+            }
+
+            currentAudio = new Audio(`data:audio/mpeg;base64,${line.audio_base64}`);
+            currentAudio.onended = () => {
+                podcastIndex++;
+                playNextAudioLine();
+            };
+            currentAudio.onerror = () => {
+                podcastIndex++;
+                playNextAudioLine();
+            };
+            currentAudio.play();
+        }
+
+        async function listenToBriefingBrowserFallback() {
+            const btn = document.getElementById('listen-btn');
+            const stopBtn = document.getElementById('stop-listen-btn');
+            const statusEl = document.getElementById('listen-status');
+
+            try {
+                const res = await fetch(`/api/briefing/podcast-script?league_id=${leagueId}&team_id=${teamId}`);
+                const data = await res.json();
+                if (data.status !== 'ok') throw new Error(data.error || 'Failed to load script.');
+
+                podcastQueue = data.script || [];
+                if (podcastQueue.length === 0) throw new Error('No script generated.');
+
+                const [voiceA, voiceB] = await pickTwoVoices();
+                const speakers = [...new Set(podcastQueue.map(s => s.speaker))];
+                podcastVoices = {};
+                podcastVoices[speakers[0]] = voiceA;
+                if (speakers[1]) podcastVoices[speakers[1]] = voiceB;
+
+                podcastIndex = 0;
+                stopBtn.style.display = 'inline-block';
+                playNextBrowserLine();
+            } catch (err) {
+                statusEl.textContent = err.message;
+                btn.disabled = false;
+            }
+        }
+
+        function playNextBrowserLine() {
+            const statusEl = document.getElementById('listen-status');
+            if (podcastStopped) return;
+            if (podcastIndex >= podcastQueue.length) {
+                document.getElementById('listen-btn').disabled = false;
+                document.getElementById('stop-listen-btn').style.display = 'none';
+                statusEl.textContent = 'Done!';
+                return;
+            }
+            const line = podcastQueue[podcastIndex];
+            const utter = new SpeechSynthesisUtterance(line.line);
+            utter.voice = podcastVoices[line.speaker];
+            utter.rate = 1.0;
+            statusEl.textContent = `${line.speaker}: ${line.line}`;
+            utter.onend = () => {
+                podcastIndex++;
+                playNextBrowserLine();
+            };
+            speechSynthesis.speak(utter);
+        }
+
+        function stopPodcast() {
+            podcastStopped = true;
+            speechSynthesis.cancel();
+            if (currentAudio) {
+                currentAudio.pause();
+                currentAudio = null;
+            }
+            document.getElementById('listen-btn').disabled = false;
+            document.getElementById('stop-listen-btn').style.display = 'none';
+            document.getElementById('listen-status').textContent = 'Stopped.';
         }
 
         async function loadRecaps() {
