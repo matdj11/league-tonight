@@ -129,6 +129,34 @@ class SleeperClient:
             logger.warning(f"Could not resolve player info for '{name}': {str(e)}")
             return None
 
+    def get_trending_adds(self, lookback_hours=24, limit=50):
+        """Get real trending waiver adds from Sleeper - genuine signal of
+        what players are actually being picked up across the platform."""
+        try:
+            url = f"{BASE_URL}/players/nfl/trending/add"
+            params = {"lookback_hours": lookback_hours, "limit": limit}
+            response = self.session.get(url, params=params)
+            response.raise_for_status()
+            trending = response.json()
+
+            players_map = self.get_players_map()
+            results = []
+            for entry in trending:
+                player_id = entry.get("player_id")
+                info = players_map.get(player_id, {})
+                full_name = info.get("full_name")
+                if full_name:
+                    results.append({
+                        "name": full_name,
+                        "team": info.get("team"),
+                        "position": info.get("position"),
+                        "add_count": entry.get("count", 0)
+                    })
+            return results
+        except Exception as e:
+            logger.error(f"Error fetching trending adds: {str(e)}")
+            return []
+
     def resolve_teams_for_names(self, player_names):
         """Resolve each name to (team_abbr or None) via Sleeper's database.
         Returns (resolved: dict name->team, unresolved: list of names)."""
