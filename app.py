@@ -1040,23 +1040,14 @@ def get_podcast_audio():
 @app.route('/api/debug/elevenlabs', methods=['GET'])
 def debug_elevenlabs():
     try:
-        import requests
-        api_key = os.getenv("ELEVENLABS_API_KEY")
-        if not api_key:
-            return jsonify({"status": "error", "error": "ELEVENLABS_API_KEY not set in environment"}), 400
-
-        response = requests.get(
-            "https://api.elevenlabs.io/v1/voices",
-            headers={"xi-api-key": api_key},
-            timeout=10
-        )
+        from elevenlabs_data import get_available_voices
+        voices = get_available_voices(force_refresh=True)
+        voice_names = [v.get("name") for v in voices]
 
         return jsonify({
             "status": "ok",
-            "http_status_code": response.status_code,
-            "response_body": response.text[:2000],
-            "key_present": True,
-            "key_prefix": api_key[:6] + "..." if len(api_key) > 6 else "too short"
+            "voice_count": len(voices),
+            "voice_names": voice_names
         })
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
