@@ -7,27 +7,197 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0B0F17; color: #F5F3EE; padding: 40px 20px; }
         .container { max-width: 700px; margin: 0 auto; }
-        .header { margin-bottom: 40px; }
-        .header h1 { font-size: 32px; font-weight: 800; margin-bottom: 8px; }
+        .header { margin-bottom: 30px; }
+        .header h1 { font-size: 32px; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 8px; }
         .header .eyebrow { color: #FFB020; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 20px; }
-        .card { background: #151B29; border: 1px solid #2A3245; border-radius: 12px; padding: 20px; margin-bottom: 20px; }
-        .footer { text-align: center; color: #8B93A7; font-size: 12px; margin-top: 40px; padding-top: 20px; border-top: 1px solid #2A3245; }
+        .content-card { background: #151B29; border: 1px solid #2A3245; border-radius: 12px; padding: 24px; margin-bottom: 20px; }
+        .content-card h2 { font-size: 18px; font-weight: 700; margin: 20px 0 8px; color: #FFB020; }
+        .content-card h2:first-child { margin-top: 0; }
+        .content-card p { color: #F5F3EE; font-size: 14px; line-height: 1.7; margin-bottom: 8px; }
+        .footer { text-align: center; color: #8B93A7; font-size: 12px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #2A3245; }
+        .share-btn { display: inline-block; background: #FFB020; color: #3A2600; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-weight: 600; margin-top: 16px; border: none; cursor: pointer; font-size: 13px; }
+        .share-btn:hover { background: #E6A018; }
+        .listen-box { text-align: center; margin: 20px 0; }
+        .stop-btn { background: #2A3245; color: #F5F3EE; margin-left: 8px; }
+        .listen-status { margin-top: 12px; font-size: 13px; color: #8B93A7; line-height: 1.5; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <div class="eyebrow">Week {{ recap.week }} Recap</div>
-            <h1>League Tonight</h1>
+            <h1>{{ league.name }}</h1>
         </div>
-        
-        <div class="card">
+
+        <div class="content-card">
             {{ recap.content|safe }}
         </div>
-        
+
+        <div class="listen-box">
+            <button class="share-btn" id="listen-btn" onclick="listenToRecap()">🎙 Listen</button>
+            <button class="share-btn stop-btn" id="stop-listen-btn" onclick="stopPodcast()" style="display:none;">⏹ Stop</button>
+            <div class="listen-status" id="listen-status"></div>
+        </div>
+
         <div class="footer">
-            <p>{{ league.name }} • League Tonight</p>
+            <p>{{ league.name }} • League Tonight • {{ recap.created_at.strftime('%B %d, %Y') }}</p>
+            <button class="share-btn" onclick="copyLink()">Copy Link</button>
         </div>
     </div>
+
+    <script>
+        const leagueId = "{{ league.league_id }}";
+        const week = "{{ recap.week }}";
+
+        function copyLink() {
+            const url = window.location.href;
+            navigator.clipboard.writeText(url).then(() => {
+                alert('Link copied to clipboard!');
+            });
+        }
+
+        let podcastVoices = {};
+        let podcastQueue = [];
+        let podcastIndex = 0;
+        let currentAudio = null;
+        let podcastStopped = false;
+
+        function loadVoices() {
+            return new Promise(resolve => {
+                let voices = speechSynthesis.getVoices();
+                if (voices.length) {
+                    resolve(voices);
+                } else {
+                    speechSynthesis.onvoiceschanged = () => resolve(speechSynthesis.getVoices());
+                }
+            });
+        }
+
+        async function pickTwoVoices() {
+            const voices = await loadVoices();
+            const englishVoices = voices.filter(v => v.lang.startsWith('en'));
+            const pool = englishVoices.length >= 2 ? englishVoices : voices;
+            const voiceA = pool[0];
+            const voiceB = pool.find(v => v.name !== voiceA.name) || pool[Math.min(1, pool.length - 1)];
+            return [voiceA, voiceB];
+        }
+
+        async function listenToRecap() {
+            const btn = document.getElementById('listen-btn');
+            const stopBtn = document.getElementById('stop-listen-btn');
+            const statusEl = document.getElementById('listen-status');
+            btn.disabled = true;
+            podcastStopped = false;
+            statusEl.textContent = 'Putting the show together...';
+
+            try {
+                const res = await fetch(`/api/recap/podcast-audio?league_id=${leagueId}&week=${week}`);
+                const data = await res.json();
+                if (data.status !== 'ok') throw new Error(data.error || 'ElevenLabs unavailable');
+
+                podcastQueue = data.lines || [];
+                if (podcastQueue.length === 0) throw new Error('No audio generated.');
+
+                podcastIndex = 0;
+                stopBtn.style.display = 'inline-block';
+                playNextAudioLine();
+            } catch (err) {
+                console.warn('ElevenLabs audio failed, falling back to browser voices:', err.message);
+                statusEl.textContent = 'Using browser voices instead...';
+                listenToRecapBrowserFallback();
+            }
+        }
+
+        function playNextAudioLine() {
+            const statusEl = document.getElementById('listen-status');
+            if (podcastStopped) return;
+            if (podcastIndex >= podcastQueue.length) {
+                document.getElementById('listen-btn').disabled = false;
+                document.getElementById('stop-listen-btn').style.display = 'none';
+                statusEl.textContent = 'Done!';
+                return;
+            }
+            const line = podcastQueue[podcastIndex];
+            statusEl.textContent = `${line.speaker}: ${line.line}`;
+
+            if (!line.audio_base64) {
+                podcastIndex++;
+                playNextAudioLine();
+                return;
+            }
+
+            currentAudio = new Audio(`data:audio/mpeg;base64,${line.audio_base64}`);
+            currentAudio.onended = () => {
+                podcastIndex++;
+                playNextAudioLine();
+            };
+            currentAudio.onerror = () => {
+                podcastIndex++;
+                playNextAudioLine();
+            };
+            currentAudio.play();
+        }
+
+        async function listenToRecapBrowserFallback() {
+            const btn = document.getElementById('listen-btn');
+            const stopBtn = document.getElementById('stop-listen-btn');
+            const statusEl = document.getElementById('listen-status');
+
+            try {
+                const res = await fetch(`/api/recap/podcast-script?league_id=${leagueId}&week=${week}`);
+                const data = await res.json();
+                if (data.status !== 'ok') throw new Error(data.error || 'Failed to load script.');
+
+                podcastQueue = data.script || [];
+                if (podcastQueue.length === 0) throw new Error('No script generated.');
+
+                const [voiceA, voiceB] = await pickTwoVoices();
+                const speakers = [...new Set(podcastQueue.map(s => s.speaker))];
+                podcastVoices = {};
+                podcastVoices[speakers[0]] = voiceA;
+                if (speakers[1]) podcastVoices[speakers[1]] = voiceB;
+
+                podcastIndex = 0;
+                stopBtn.style.display = 'inline-block';
+                playNextBrowserLine();
+            } catch (err) {
+                statusEl.textContent = err.message;
+                btn.disabled = false;
+            }
+        }
+
+        function playNextBrowserLine() {
+            const statusEl = document.getElementById('listen-status');
+            if (podcastStopped) return;
+            if (podcastIndex >= podcastQueue.length) {
+                document.getElementById('listen-btn').disabled = false;
+                document.getElementById('stop-listen-btn').style.display = 'none';
+                statusEl.textContent = 'Done!';
+                return;
+            }
+            const line = podcastQueue[podcastIndex];
+            const utter = new SpeechSynthesisUtterance(line.line);
+            utter.voice = podcastVoices[line.speaker];
+            utter.rate = 1.0;
+            statusEl.textContent = `${line.speaker}: ${line.line}`;
+            utter.onend = () => {
+                podcastIndex++;
+                playNextBrowserLine();
+            };
+            speechSynthesis.speak(utter);
+        }
+
+        function stopPodcast() {
+            podcastStopped = true;
+            speechSynthesis.cancel();
+            if (currentAudio) {
+                currentAudio.pause();
+                currentAudio = null;
+            }
+            document.getElementById('listen-btn').disabled = false;
+            document.getElementById('stop-listen-btn').style.display = 'none';
+            document.getElementById('listen-status').textContent = 'Stopped.';
+        }
+    </script>
 </body>
 </html>
