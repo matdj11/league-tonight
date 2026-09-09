@@ -18,7 +18,8 @@ from database import init_db, db_session, League, Recap, Briefing, User, Roster,
 from sleeper_client import SleeperClient, build_bye_conflicts_from_team_map, _normalize_name
 from espn_data import get_weather_by_team, build_weather_notes, get_relevant_news, build_news_notes
 from fantasypros_data import get_projected_points_for_names, build_projection_notes, get_current_nfl_week
-from claude_helper import generate_recap, generate_draft_recap, generate_briefing, generate_season_preview, ai_resolve_team_for_names, generate_lineup_suggestion, generate_matchup_preview, ai_resolve_player_info_for_names, generate_waiver_suggestions, generate_ask_response
+from elevenlabs_data import pick_two_voice_ids, synthesize_script
+from claude_helper import generate_recap, generate_draft_recap, generate_briefing, generate_season_preview, ai_resolve_team_for_names, generate_lineup_suggestion, generate_matchup_preview, ai_resolve_player_info_for_names, generate_waiver_suggestions, generate_ask_response, generate_podcast_script
 
 sleeper = SleeperClient()
 
@@ -966,6 +967,74 @@ def ask_question():
         return jsonify({"status": "ok", "answer": answer})
     except Exception as e:
         logger.error(f"Ask question failed: {str(e)}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route('/api/briefing/podcast-script', methods=['GET'])
+def get_podcast_script():
+    try:
+        league_id = request.args.get('league_id')
+        team_id = request.args.get('team_id')
+
+        if not league_id or not team_id:
+            return jsonify({"status": "error", "error": "league_id and team_id required"}), 400
+
+        league = db_session.query(League).filter_by(league_id=league_id).first()
+        roster = db_session.query(Roster).filter_by(league_id=league_id, team_id=team_id).first()
+        briefing = db_session.query(Briefing).filter_by(
+            league_id=league_id, team_id=team_id
+        ).order_by(Briefing.created_at.desc()).first()
+
+        if not briefing:
+            return jsonify({"status": "error", "error": "No briefing found yet - generate one first"}), 404
+
+        script_data = generate_podcast_script(
+            league.name if league else "the league",
+            roster.team_name if roster else "your team",
+            briefing.content
+        )
+
+        return jsonify({"status": "ok", "script": script_data.get("script", [])})
+    except Exception as e:
+        logger.error(f"Get podcast script failed: {str(e)}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route('/api/briefing/podcast-audio', methods=['GET'])
+def get_podcast_audio():
+    try:
+        league_id = request.args.get('league_id')
+        team_id = request.args.get('team_id')
+
+        if not league_id or not team_id:
+            return jsonify({"status": "error", "error": "league_id and team_id required"}), 400
+
+        league = db_session.query(League).filter_by(league_id=league_id).first()
+        roster = db_session.query(Roster).filter_by(league_id=league_id, team_id=team_id).first()
+        briefing = db_session.query(Briefing).filter_by(
+            league_id=league_id, team_id=team_id
+        ).order_by(Briefing.created_at.desc()).first()
+
+        if not briefing:
+            return jsonify({"status": "error", "error": "No briefing found yet - generate one first"}), 404
+
+        script_data = generate_podcast_script(
+            league.name if league else "the league",
+            roster.team_name if roster else "your team",
+            briefing.content
+        )
+        script = script_data.get("script", [])
+
+        voice_a_id, voice_b_id = pick_two_voice_ids()
+        if not voice_a_id:
+            return jsonify({"status": "error", "error": "ElevenLabs not configured or no voices available"}), 400
+
+        audio_lines = synthesize_script(script, voice_a_id, voice_b_id)
+
+        if not any(line.get('audio_base64') for line in audio_lines):
+            return jsonify({"status": "error", "error": "Audio synthesis failed for all lines"}), 500
+
+        return jsonify({"status": "ok", "lines": audio_lines})
+    except Exception as e:
+        logger.error(f"Get podcast audio failed: {str(e)}")
         return jsonify({"status": "error", "error": str(e)}), 500
 
 @app.route('/api/stakes', methods=['GET'])
