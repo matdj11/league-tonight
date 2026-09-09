@@ -406,10 +406,14 @@ def generate_lineup_suggestion(league_id, team_id, weather_notes=None, news_note
 MATCHUP_PROMPT = """You are a fantasy football analyst previewing a head-to-head matchup for a fantasy manager.
 
 Your team: {team_a_name}
-Your roster: {team_a_players}
+Your projected STARTING LINEUP this week: {team_a_lineup}
+Your full roster (bench depth, for context only): {team_a_players}
 
 Your opponent: {team_b_name}
-Their roster: {team_b_players}
+Their projected STARTING LINEUP this week: {team_b_lineup}
+Their full roster (bench depth, for context only): {team_b_players}
+
+IMPORTANT: Base your game_outlook, strengths, and weaknesses on the STARTING LINEUPS above, not the full bench. Only one player starts per position slot (e.g. only 1 TE plays even if a team rosters 2), so a deep bench at a position does NOT make a team stronger there this week - only who's actually starting matters. You may reference bench depth only when discussing suggested_moves (e.g. a valid injury replacement).
 
 Speak directly to the manager as "you" and refer to the opponent by name or as "your opponent". Give:
 
@@ -437,14 +441,16 @@ Respond ONLY as a JSON object in this exact shape, no other text:
   "suggested_moves": [{{"text": "short actionable suggestion"}}]
 }}"""
 
-def generate_matchup_preview(team_a_name, team_a_players, team_b_name, team_b_players):
+def generate_matchup_preview(team_a_name, team_a_players, team_b_name, team_b_players, team_a_lineup=None, team_b_lineup=None):
     try:
         client = anthropic.Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
 
         prompt = MATCHUP_PROMPT.format(
             team_a_name=team_a_name,
+            team_a_lineup=team_a_lineup if team_a_lineup else "Not available, use full roster as a rough guide",
             team_a_players=", ".join(team_a_players[:15]) if team_a_players else "No roster data",
             team_b_name=team_b_name,
+            team_b_lineup=team_b_lineup if team_b_lineup else "Not available, use full roster as a rough guide",
             team_b_players=", ".join(team_b_players[:15]) if team_b_players else "No roster data"
         )
 
