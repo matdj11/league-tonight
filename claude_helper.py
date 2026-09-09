@@ -469,6 +469,134 @@ def generate_matchup_preview(team_a_name, team_a_players, team_b_name, team_b_pl
         logger.error(f"Error generating matchup preview with Claude: {str(e)}")
         return {"game_outlook": f"Failed: {str(e)}", "summary": "", "strengths": [], "weaknesses": [], "players_to_watch": [], "suggested_moves": []}
 
+WAIVER_PROMPT = """You are a fantasy football waiver wire advisor.
+
+Manager's team: {team_name}
+Manager's current roster: {roster_players}
+
+RISK PREFERENCE: {risk_description}
+
+REAL AVAILABLE PLAYERS (trending waiver adds across the platform right now - these are confirmed available, do not suggest anyone not on this list):
+{candidates}
+
+Based on this manager's roster construction (positions that look thin or risky) and their stated risk preference, recommend 2-4 players from the available list above. For each, explain briefly why it fits their team AND their risk preference.
+
+Only recommend players from the list above. If the list is empty or nothing fits well, say so honestly rather than inventing a suggestion.
+
+Respond ONLY as a JSON object in this exact shape, no other text:
+{{
+  "suggestions": [
+    {{"player": "exact name from the list", "position": "position", "reason": "short reason tied to their roster and risk preference"}}
+  ]
+}}"""
+
+RISK_DESCRIPTIONS = {
+    "safe": "Prioritize proven, consistent players with a reliable track record and clear role, even if their ceiling is lower. Avoid boom-or-bust or unproven players.",
+    "balanced": "Look for a reasonable mix of reliability and upside - solid role players who also have some breakout potential.",
+    "boom_or_bust": "Prioritize high-upside, high-variance players who could be a league-winner if things break right, even if they're inconsistent or unproven. Favor ceiling over floor."
+}
+
+def generate_waiver_suggestions(team_name, roster_players, candidates, risk_level="balanced"):
+    try:
+        client = anthropic.Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
+
+        if not candidates:
+            return {"suggestions": []}
+
+        candidates_text = chr(10).join([
+            f"{c['name']} ({c.get('position', '?')}, {c.get('team', '?')}) - {c.get('add_count', 0)} adds recently"
+            for c in candidates
+        ])
+
+        risk_description = RISK_DESCRIPTIONS.get(risk_level, RISK_DESCRIPTIONS["balanced"])
+
+        prompt = WAIVER_PROMPT.format(
+            team_name=team_name,
+            roster_players=", ".join(roster_players[:20]) if roster_players else "No roster data",
+            risk_description=risk_description,
+            candidates=candidates_text
+        )
+
+        message = client.messages.create(
+            model="claude-sonnet-5",
+            max_tokens=1024,
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+
+        raw_text = _extract_text(message)
+
+        def _waiver_fallback(text):
+            return {"suggestions": []}
+
+        waiver_data = _parse_json_safely(raw_text, _waiver_fallback)
+        logger.info(f"Generated Claude waiver suggestions for {team_name} (risk: {risk_level})")
+        return waiver_data
+
+    except Exception as e:
+        logger.error(f"Error generating waiver suggestions with Claude: {str(e)}")
+        return {"suggestions": [], "error": str(e)}
+
+ASK_PROMPT = """You are a fantasy football assistant for a manager in the league "{league_name}".
+
+Their team: {team_name}
+Their roster: {roster_players}
+
+CONFIRMED BYE WEEK CONFLICTS: {bye_conflicts}
+CONFIRMED WEATHER: {weather_notes}
+RECENT NEWS ABOUT THEIR PLAYERS: {news_notes}
+THIS WEEK'S OPPONENT: {opponent_context}
+
+The manager just asked: "{question}"
+
+Answer directly and conversationally, like a knowledgeable friend who actually knows their team. Use the confirmed data above where relevant - never invent injury, weather, or news facts that aren't listed. If the question is about something you don't have real data for, say so honestly rather than making it up. Keep the answer focused and not overly long - a few sentences to a short paragraph is usually right, longer only if the question genuinely needs it.
+
+Respond with plain conversational text, not JSON."""
+
+def generate_ask_response(league_id, team_id, question, bye_conflicts=None, weather_notes=None, news_notes=None, opponent_context=None):
+    try:
+        client = anthropic.Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
+
+        league = db_session.query(League).filter_by(league_id=league_id).first()
+        roster = db_session.query(Roster).filter_by(league_id=league_id, team_id=team_id).first()
+
+        if not roster:
+            return "I couldn't find your roster - try refreshing the page."
+
+        roster_players = ", ".join(roster.players[:20]) if roster.players else "No roster data"
+        bye_conflicts_text = chr(10).join(bye_conflicts) if bye_conflicts else "None found."
+        weather_notes_text = chr(10).join(weather_notes) if weather_notes else "None found."
+        news_notes_text = chr(10).join(news_notes) if news_notes else "None found."
+        opponent_text = opponent_context if opponent_context else "Not set for this week."
+
+        prompt = ASK_PROMPT.format(
+            league_name=league.name if league else "your league",
+            team_name=roster.team_name,
+            roster_players=roster_players,
+            bye_conflicts=bye_conflicts_text,
+            weather_notes=weather_notes_text,
+            news_notes=news_notes_text,
+            opponent_context=opponent_text,
+            question=question
+        )
+
+        message = client.messages.create(
+            model="claude-sonnet-5",
+            max_tokens=800,
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+
+        answer = _extract_text(message)
+        logger.info(f"Generated Ask response for team {team_id} in league {league_id}")
+        return answer
+
+    except Exception as e:
+        logger.error(f"Error generating ask response with Claude: {str(e)}")
+        return f"Something went wrong answering that: {str(e)}"
+
 def generate_season_preview(league_id):
     try:
         client = anthropic.Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
