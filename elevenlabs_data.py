@@ -8,12 +8,18 @@ logger = logging.getLogger(__name__)
 BASE_URL = "https://api.elevenlabs.io/v1"
 
 _voices_cache = None
+_voices_cache_time = 0
+VOICES_CACHE_TTL = 300  # 5 minutes
 
 
-def get_available_voices():
-    global _voices_cache
-    if _voices_cache is not None:
+def get_available_voices(force_refresh=False):
+    global _voices_cache, _voices_cache_time
+    import time
+    now = time.time()
+
+    if not force_refresh and _voices_cache is not None and (now - _voices_cache_time) < VOICES_CACHE_TTL:
         return _voices_cache
+
     api_key = os.getenv("ELEVENLABS_API_KEY")
     if not api_key:
         logger.warning("ELEVENLABS_API_KEY not set")
@@ -23,19 +29,41 @@ def get_available_voices():
         response.raise_for_status()
         data = response.json()
         _voices_cache = data.get("voices", [])
+        _voices_cache_time = now
         return _voices_cache
     except Exception as e:
         logger.warning(f"Could not fetch ElevenLabs voices: {str(e)}")
-        return []
+        return _voices_cache if _voices_cache is not None else []
+
+
+def _find_voice_by_name(voices, name_query):
+    if not name_query:
+        return None
+    query = name_query.lower().strip()
+    for v in voices:
+        if query in v.get("name", "").lower():
+            return v["voice_id"]
+    return None
 
 
 def pick_two_voice_ids():
     voices = get_available_voices()
-    if len(voices) >= 2:
-        return voices[0]["voice_id"], voices[1]["voice_id"]
-    elif len(voices) == 1:
-        return voices[0]["voice_id"], voices[0]["voice_id"]
-    return None, None
+    if not voices:
+        return None, None
+
+    preferred_a = os.getenv("ELEVENLABS_VOICE_A")
+    preferred_b = os.getenv("ELEVENLABS_VOICE_B")
+
+    voice_a_id = _find_voice_by_name(voices, preferred_a)
+    voice_b_id = _find_voice_by_name(voices, preferred_b)
+
+    if not voice_a_id:
+        voice_a_id = voices[0]["voice_id"]
+    if not voice_b_id:
+        fallback = next((v for v in voices if v["voice_id"] != voice_a_id), voices[0])
+        voice_b_id = fallback["voice_id"]
+
+    return voice_a_id, voice_b_id
 
 
 def synthesize_speech(text, voice_id):
