@@ -1,4 +1,5 @@
 from flask import Flask, render_template, jsonify, request
+import json
 from flask_cors import CORS
 import os
 from dotenv import load_dotenv
@@ -78,6 +79,8 @@ def migrate_database():
             "ALTER TABLE leagues ADD COLUMN IF NOT EXISTS weather_api_key VARCHAR",
             "ALTER TABLE rosters ADD COLUMN IF NOT EXISTS team_pin VARCHAR(4)",
             "ALTER TABLE rosters ADD COLUMN IF NOT EXISTS claimed BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE recaps ADD COLUMN IF NOT EXISTS podcast_script TEXT",
+            "ALTER TABLE recaps ADD COLUMN IF NOT EXISTS podcast_audio TEXT",
         ]
 
         results = []
@@ -1211,6 +1214,10 @@ def get_recap_podcast_script():
         if not recap:
             return jsonify({"status": "error", "error": "Recap not found"}), 404
 
+        if recap.podcast_script:
+            cached_script = json.loads(recap.podcast_script)
+            return jsonify({"status": "ok", "script": cached_script, "cached": True})
+
         script_data = generate_recap_podcast_script(
             league.name if league else "the league",
             week,
@@ -1221,7 +1228,10 @@ def get_recap_podcast_script():
         if not script:
             return jsonify({"status": "error", "error": script_data.get("error", "Couldn't generate a podcast script.")}), 500
 
-        return jsonify({"status": "ok", "script": script})
+        recap.podcast_script = json.dumps(script)
+        db_session.commit()
+
+        return jsonify({"status": "ok", "script": script, "cached": False})
     except Exception as e:
         logger.error(f"Get recap podcast script failed: {str(e)}")
         return jsonify({"status": "error", "error": str(e)}), 500
@@ -1241,15 +1251,23 @@ def get_recap_podcast_audio():
         if not recap:
             return jsonify({"status": "error", "error": "Recap not found"}), 404
 
-        script_data = generate_recap_podcast_script(
-            league.name if league else "the league",
-            week,
-            recap.content
-        )
-        script = script_data.get("script", [])
+        if recap.podcast_audio:
+            cached_lines = json.loads(recap.podcast_audio)
+            return jsonify({"status": "ok", "lines": cached_lines, "cached": True})
 
-        if not script:
-            return jsonify({"status": "error", "error": script_data.get("error", "Couldn't generate a podcast script.")}), 500
+        if recap.podcast_script:
+            script = json.loads(recap.podcast_script)
+        else:
+            script_data = generate_recap_podcast_script(
+                league.name if league else "the league",
+                week,
+                recap.content
+            )
+            script = script_data.get("script", [])
+            if not script:
+                return jsonify({"status": "error", "error": script_data.get("error", "Couldn't generate a podcast script.")}), 500
+            recap.podcast_script = json.dumps(script)
+            db_session.commit()
 
         voice_a_id, voice_b_id = pick_two_voice_ids()
         if not voice_a_id:
@@ -1260,7 +1278,10 @@ def get_recap_podcast_audio():
         if not any(line.get('audio_base64') for line in audio_lines):
             return jsonify({"status": "error", "error": "Audio synthesis failed for all lines"}), 500
 
-        return jsonify({"status": "ok", "lines": audio_lines})
+        recap.podcast_audio = json.dumps(audio_lines)
+        db_session.commit()
+
+        return jsonify({"status": "ok", "lines": audio_lines, "cached": False})
     except Exception as e:
         logger.error(f"Get recap podcast audio failed: {str(e)}")
         return jsonify({"status": "error", "error": str(e)}), 500
