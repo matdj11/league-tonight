@@ -118,6 +118,8 @@ class Recap(Base):
     status = Column(String, default='draft')
     published_at = Column(DateTime)
     shareable_link = Column(String)
+    podcast_script = Column(Text)
+    podcast_audio = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
