@@ -1117,6 +1117,141 @@ def debug_elevenlabs():
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
 
+@app.route('/api/league/matchups', methods=['GET'])
+def get_week_matchups():
+    try:
+        league_id = request.args.get('league_id')
+        week = request.args.get('week')
+
+        if not league_id or not week:
+            return jsonify({"status": "error", "error": "league_id and week required"}), 400
+
+        matchups = db_session.query(Matchup).filter_by(league_id=league_id, week=int(week)).all()
+
+        results = [
+            {
+                "matchup_row_id": m.id,
+                "team_1_id": m.team_1_id,
+                "team_1_name": m.team_1_name,
+                "team_1_score": m.team_1_score,
+                "team_2_id": m.team_2_id,
+                "team_2_name": m.team_2_name,
+                "team_2_score": m.team_2_score,
+                "winner": m.winner
+            }
+            for m in matchups
+        ]
+
+        return jsonify({"status": "ok", "week": int(week), "matchups": results})
+    except Exception as e:
+        logger.error(f"Get week matchups failed: {str(e)}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+def _recompute_team_record(league_id, team_id):
+    roster = db_session.query(Roster).filter_by(league_id=league_id, team_id=team_id).first()
+    if not roster:
+        return
+
+    matchups = db_session.query(Matchup).filter_by(league_id=league_id).filter(
+        (Matchup.team_1_id == team_id) | (Matchup.team_2_id == team_id)
+    ).all()
+
+    wins = 0
+    losses = 0
+    points_for = 0.0
+    points_against = 0.0
+
+    for m in matchups:
+        if m.team_1_id == team_id:
+            my_score = m.team_1_score or 0
+            opp_score = m.team_2_score or 0
+        else:
+            my_score = m.team_2_score or 0
+            opp_score = m.team_1_score or 0
+
+        points_for += my_score
+        points_against += opp_score
+
+        if my_score > opp_score:
+            wins += 1
+        elif my_score < opp_score:
+            losses += 1
+
+    roster.wins = wins
+    roster.losses = losses
+    roster.points_for = round(points_for, 1)
+    roster.points_against = round(points_against, 1)
+
+@app.route('/api/matchup/set-score', methods=['POST'])
+def set_matchup_score():
+    try:
+        data = request.get_json()
+        league_id = data.get('league_id')
+        week = data.get('week')
+        team_1_id = data.get('team_1_id')
+        team_2_id = data.get('team_2_id')
+        team_1_score = data.get('team_1_score')
+        team_2_score = data.get('team_2_score')
+
+        if not all([league_id, week, team_1_id, team_2_id]):
+            return jsonify({"status": "error", "error": "league_id, week, team_1_id, team_2_id required"}), 400
+
+        week = int(week)
+        team_1_score = float(team_1_score) if team_1_score not in (None, '') else 0.0
+        team_2_score = float(team_2_score) if team_2_score not in (None, '') else 0.0
+
+        team_1_roster = db_session.query(Roster).filter_by(league_id=league_id, team_id=team_1_id).first()
+        team_2_roster = db_session.query(Roster).filter_by(league_id=league_id, team_id=team_2_id).first()
+        if not team_1_roster or not team_2_roster:
+            return jsonify({"status": "error", "error": "one or both teams not found"}), 404
+
+        existing = db_session.query(Matchup).filter_by(league_id=league_id, week=week).filter(
+            ((Matchup.team_1_id == team_1_id) & (Matchup.team_2_id == team_2_id)) |
+            ((Matchup.team_1_id == team_2_id) & (Matchup.team_2_id == team_1_id))
+        ).first()
+
+        winner = None
+        if team_1_score > team_2_score:
+            winner = team_1_id
+        elif team_2_score > team_1_score:
+            winner = team_2_id
+        else:
+            winner = 'tie'
+
+        if existing:
+            existing.team_1_id = team_1_id
+            existing.team_1_name = team_1_roster.team_name
+            existing.team_1_score = team_1_score
+            existing.team_2_id = team_2_id
+            existing.team_2_name = team_2_roster.team_name
+            existing.team_2_score = team_2_score
+            existing.winner = winner
+        else:
+            new_matchup = Matchup(
+                id=str(uuid.uuid4()),
+                league_id=league_id,
+                week=week,
+                team_1_id=team_1_id,
+                team_1_name=team_1_roster.team_name,
+                team_1_score=team_1_score,
+                team_2_id=team_2_id,
+                team_2_name=team_2_roster.team_name,
+                team_2_score=team_2_score,
+                winner=winner
+            )
+            db_session.add(new_matchup)
+
+        db_session.commit()
+
+        _recompute_team_record(league_id, team_1_id)
+        _recompute_team_record(league_id, team_2_id)
+        db_session.commit()
+
+        return jsonify({"status": "saved", "week": week, "winner": winner})
+    except Exception as e:
+        logger.error(f"Set matchup score failed: {str(e)}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
 @app.route('/api/stakes', methods=['GET'])
 def get_stakes():
     try:
