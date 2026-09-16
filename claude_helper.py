@@ -88,27 +88,34 @@ Respond ONLY as a JSON object in this exact shape, no other text:
   "lineup_warning": "specific sentence naming the players and bye week if a confirmed conflict exists, otherwise null"
 }}"""
 
-SEASON_PREVIEW_PROMPT = """You are a sports analyst creating a season preview for a fantasy football league called "{league_name}" before games have started.
+SEASON_PREVIEW_PROMPT = """You are a sports analyst creating a power rankings breakdown for a fantasy football league called "{league_name}".
 
-Here are the teams and their rosters:
+REAL CURRENT STANDINGS (wins-losses, points for, points against - actual results, not guesses):
+{standings}
 
+REAL CURRENT INJURIES ON EACH ROSTER (confirmed, not guessed - if empty for a team, they have no notable injuries right now):
+{injuries}
+
+Team rosters for context (depth, construction):
 {teams}
 
-Since no games have been played yet, create a season preview based on roster construction and projections instead of actual results. Include:
-1. Projected strongest team ("Team to Beat") with a short reason
-2. Projected weakest team ("Rebuild Watch") with a short reason, keep it light and funny not mean
-3. A power ranking of all teams 1 to N based on roster strength (your best judgment)
-4. One spicy AI "bold prediction" for the season
+If the standings above show real results (any wins or losses, or non-zero points), your analysis MUST be based on those real results - actual record and points scored - not on roster names or preseason hype. Consider real injuries when assessing a team's outlook. Only fall back to pure roster-construction reasoning if every team is still 0-0 with 0 points (true preseason, no games played yet).
+
+Include:
+1. "Team to Beat" - whoever's actually playing best right now (best record, most points, healthy roster) with a short reason grounded in real results.
+2. "Rebuild Watch" - whoever's actually struggling (worst record, fewest points, banged up) with a short reason, keep it light and funny not mean.
+3. A power ranking of all teams 1 to N based on REAL performance (record and points), not roster hype.
+4. One spicy AI "bold prediction" for how the rest of the season plays out, grounded in what's actually happened so far.
 
 Respond ONLY as a JSON object in this exact shape, no other text:
 {{
-  "team_to_beat": "short text naming a team and why",
-  "rebuild_watch": "short text naming a team and why, light and funny",
+  "team_to_beat": "short text naming a team and why, based on real results",
+  "rebuild_watch": "short text naming a team and why, based on real results, light and funny",
   "power_rankings": [
     {{"rank": 1, "team": "team name"}},
     {{"rank": 2, "team": "team name"}}
   ],
-  "bold_prediction": "one spicy prediction for the season"
+  "bold_prediction": "one spicy prediction grounded in real performance so far"
 }}"""
 
 def _extract_text(message):
