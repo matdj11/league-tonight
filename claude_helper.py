@@ -12,15 +12,18 @@ Here are the current standings and rosters:
 
 {standings}
 
-Create a fun, energetic recap that includes:
-1. A power ranking of all teams (1 = best) based on wins/losses and points
-2. A callout for the team with the most points (call them "on fire")
-3. A callout for the team with the fewest points (a light, funny "punishment watch" tone, not mean)
-4. One spicy AI "hot take" about the league this week
+Write like a real sports column, not a spreadsheet read aloud. Focus on the 3-4 most interesting STORYLINES of the week rather than commenting on every single team - a good recap picks its moments instead of running through the whole league one by one. Include:
 
-Keep it fun and conversational, like a sports radio host. Reference actual team names.
+1. A short, punchy opening (2-3 sentences max) setting the tone for the week.
+2. The Blowout of the Week - the biggest margin of victory. Have fun with how one-sided it was, roast it a little.
+3. The Closest Game - the smallest margin. Build some tension describing how close it was.
+4. One Spicy Hot Take - a bold, opinionated claim about a team or trend this week (not just a recap of a score).
+5. Power Rankings - a QUICK numbered list of every team, name only, no commentary per team (this is a reference list, not the main event - keep it terse so the real writing above gets the space).
+6. Punishment Watch - a short, funny call-out of whoever's in last place.
 
-Respond in HTML format using <h2> for section headers and <p> for text. Do not include <html>, <head>, or <body> tags - just the inner content."""
+Keep the tone sharp, a little trash-talky, genuinely funny - like a real fantasy football column people actually enjoy reading, not a formulaic report. Use real team names and scores. Use emojis sparingly.
+
+Respond in HTML format using <h2> for section headers, <p> for text, and <ol> for the power rankings list. Do not include <html>, <head>, or <body> tags - just the inner content."""
 
 DRAFT_PROMPT = """You are a sports analyst creating a fun, entertaining recap of a fantasy football draft for a league called "{league_name}".
 
@@ -152,7 +155,7 @@ def generate_recap(league_id, week):
 
         message = client.messages.create(
             model="claude-sonnet-5",
-            max_tokens=1024,
+            max_tokens=2048,
             messages=[
                 {"role": "user", "content": prompt}
             ]
