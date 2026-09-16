@@ -23,6 +23,10 @@ Write like a real sports column, not a spreadsheet read aloud. Focus on the 3-4 
 
 Keep the tone sharp, a little trash-talky, genuinely funny - like a real fantasy football column people actually enjoy reading, not a formulaic report. Use real team names and scores. Use emojis sparingly.
 
+You also have REAL individual player performances for this week below. Use these when they help tell a story (e.g. a standout performance driving a win, or a stud dud dragging a team down) - never invent a player's points, only reference what's given:
+
+{player_performances}
+
 Respond in HTML format using <h2> for section headers, <p> for text, and <ol> for the power rankings list. Do not include <html>, <head>, or <body> tags - just the inner content."""
 
 DRAFT_PROMPT = """You are a sports analyst creating a fun, entertaining recap of a fantasy football draft for a league called "{league_name}".
@@ -133,7 +137,7 @@ def _parse_json_safely(raw_text, fallback):
             return fallback(raw_text)
         return fallback
 
-def generate_recap(league_id, week):
+def generate_recap(league_id, week, player_performances=None):
     try:
         client = anthropic.Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
 
@@ -148,9 +152,12 @@ def generate_recap(league_id, week):
             for r in rosters
         ])
 
+        player_performances_text = chr(10).join(player_performances) if player_performances else "No individual player performance data available for this week."
+
         prompt = RECAP_PROMPT.format(
             league_name=league.name,
-            standings=standings_text
+            standings=standings_text,
+            player_performances=player_performances_text
         )
 
         message = client.messages.create(
