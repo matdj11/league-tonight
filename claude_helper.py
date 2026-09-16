@@ -741,7 +741,7 @@ def generate_season_preview(league_id):
 
         message = client.messages.create(
             model="claude-sonnet-5",
-            max_tokens=1536,
+            max_tokens=3072,
             messages=[
                 {"role": "user", "content": prompt}
             ]
