@@ -1076,6 +1076,49 @@ def get_podcast_audio():
         logger.error(f"Get podcast audio failed: {str(e)}")
         return jsonify({"status": "error", "error": str(e)}), 500
 
+@app.route('/api/debug/league-state', methods=['GET'])
+def debug_league_state():
+    try:
+        league_id = request.args.get('league_id')
+        if not league_id:
+            return jsonify({"status": "error", "error": "league_id required"}), 400
+
+        rosters = db_session.query(Roster).filter_by(league_id=league_id).all()
+        roster_data = [
+            {
+                "team_id": r.team_id,
+                "team_name": r.team_name,
+                "wins": r.wins,
+                "losses": r.losses,
+                "points_for": r.points_for,
+                "points_against": r.points_against
+            }
+            for r in rosters
+        ]
+
+        matchups = db_session.query(Matchup).filter_by(league_id=league_id).all()
+        matchup_data = [
+            {
+                "week": m.week,
+                "team_1_id": m.team_1_id,
+                "team_1_name": m.team_1_name,
+                "team_1_score": m.team_1_score,
+                "team_2_id": m.team_2_id,
+                "team_2_name": m.team_2_name,
+                "team_2_score": m.team_2_score,
+                "winner": m.winner
+            }
+            for m in matchups
+        ]
+
+        return jsonify({
+            "status": "ok",
+            "rosters": roster_data,
+            "matchups": matchup_data
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
 @app.route('/api/debug/sleeper-stats', methods=['GET'])
 def debug_sleeper_stats():
     try:
