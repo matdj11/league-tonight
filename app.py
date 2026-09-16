@@ -741,6 +741,42 @@ def update_roster_players():
         logger.error(f"Update roster players failed: {str(e)}")
         return jsonify({"status": "error", "error": str(e)}), 500
 
+@app.route('/api/roster/update-score', methods=['POST'])
+def update_roster_score():
+    try:
+        data = request.get_json()
+        league_id = data.get('league_id')
+        team_id = data.get('team_id')
+
+        if not league_id or not team_id:
+            return jsonify({"status": "error", "error": "league_id and team_id required"}), 400
+
+        roster = db_session.query(Roster).filter_by(league_id=league_id, team_id=team_id).first()
+        if not roster:
+            return jsonify({"status": "error", "error": "roster not found"}), 404
+
+        if 'wins' in data:
+            roster.wins = int(data.get('wins', 0))
+        if 'losses' in data:
+            roster.losses = int(data.get('losses', 0))
+        if 'points_for' in data:
+            roster.points_for = float(data.get('points_for', 0))
+        if 'points_against' in data:
+            roster.points_against = float(data.get('points_against', 0))
+
+        db_session.commit()
+
+        return jsonify({
+            "status": "updated",
+            "wins": roster.wins,
+            "losses": roster.losses,
+            "points_for": roster.points_for,
+            "points_against": roster.points_against
+        })
+    except Exception as e:
+        logger.error(f"Update roster score failed: {str(e)}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
 @app.route('/api/roster/full', methods=['GET'])
 def get_full_roster():
     try:
@@ -1038,6 +1074,32 @@ def get_podcast_audio():
         return jsonify({"status": "ok", "lines": audio_lines})
     except Exception as e:
         logger.error(f"Get podcast audio failed: {str(e)}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route('/api/debug/sleeper-stats', methods=['GET'])
+def debug_sleeper_stats():
+    try:
+        import requests as req
+        week = request.args.get('week', '1')
+        url = f"https://api.sleeper.app/v1/stats/nfl/regular/2026/{week}"
+        response = req.get(url, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+
+        sample = {}
+        count = 0
+        for player_id, stats in data.items():
+            sample[player_id] = stats
+            count += 1
+            if count >= 3:
+                break
+
+        return jsonify({
+            "status": "ok",
+            "total_players": len(data),
+            "sample": sample
+        })
+    except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
 
 @app.route('/api/debug/elevenlabs', methods=['GET'])
