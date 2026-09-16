@@ -416,11 +416,25 @@ def publish_recap():
     try:
         league_id = request.args.get('league_id') or request.form.get('league_id')
         week = request.args.get('week') or request.form.get('week', '1')
-        recap = db_session.query(Recap).filter_by(league_id=league_id, week=str(week)).first()
+
+        recap = db_session.query(Recap).filter_by(
+            league_id=league_id, week=str(week)
+        ).order_by(Recap.created_at.desc()).first()
+
         if not recap:
             return jsonify({"status": "recap not found"}), 404
+
+        older_recaps = db_session.query(Recap).filter_by(
+            league_id=league_id, week=str(week)
+        ).filter(Recap.id != recap.id).all()
+        for old in older_recaps:
+            db_session.delete(old)
+
         recap.status = 'published'
+        recap.podcast_script = None
+        recap.podcast_audio = None
         db_session.commit()
+
         shareable_link = f"{request.host_url}recap/{league_id}/{week}"
         return jsonify({
             "status": "published",
