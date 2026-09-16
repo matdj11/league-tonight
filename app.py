@@ -318,6 +318,7 @@ def generate_recap_endpoint():
             return jsonify({"status": "league not found"}), 404
 
         player_performances = []
+        week_matchups = []
         try:
             if week.isdigit():
                 rosters = db_session.query(Roster).filter_by(league_id=league_id).all()
@@ -337,10 +338,21 @@ def generate_recap_endpoint():
                     league_top.sort(key=lambda x: x[1], reverse=True)
                     best_name, best_pts, best_team = league_top[0]
                     player_performances.append(f"League-wide highest individual scorer: {best_name} ({best_team}) with {best_pts} points")
-        except Exception as e:
-            logger.warning(f"Could not compute player performances: {str(e)}")
 
-        recap_content = generate_recap(league_id, week, player_performances=player_performances)
+                matchups = db_session.query(Matchup).filter_by(league_id=league_id, week=int(week)).all()
+                for m in matchups:
+                    if m.winner and m.winner != 'tie':
+                        winner_name = m.team_1_name if m.winner == m.team_1_id else m.team_2_name
+                        loser_name = m.team_2_name if m.winner == m.team_1_id else m.team_1_name
+                        winner_score = m.team_1_score if m.winner == m.team_1_id else m.team_2_score
+                        loser_score = m.team_2_score if m.winner == m.team_1_id else m.team_1_score
+                        week_matchups.append(f"{winner_name} ({winner_score}) defeated {loser_name} ({loser_score})")
+                    else:
+                        week_matchups.append(f"{m.team_1_name} ({m.team_1_score}) tied {m.team_2_name} ({m.team_2_score})")
+        except Exception as e:
+            logger.warning(f"Could not compute player performances or matchups: {str(e)}")
+
+        recap_content = generate_recap(league_id, week, player_performances=player_performances, week_matchups=week_matchups)
         recap = Recap(
             id=str(uuid.uuid4()),
             league_id=league_id,
