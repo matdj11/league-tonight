@@ -1114,6 +1114,55 @@ def get_podcast_audio():
         logger.error(f"Get podcast audio failed: {str(e)}")
         return jsonify({"status": "error", "error": str(e)}), 500
 
+@app.route('/api/debug/player-performances', methods=['GET'])
+def debug_player_performances():
+    try:
+        league_id = request.args.get('league_id')
+        week = request.args.get('week', '1')
+
+        if not league_id:
+            return jsonify({"status": "error", "error": "league_id required"}), 400
+
+        rosters = db_session.query(Roster).filter_by(league_id=league_id).all()
+
+        details = []
+        player_performances = []
+        league_top = []
+
+        for r in rosters:
+            if not r.players:
+                details.append({"team": r.team_name, "note": "no players on roster"})
+                continue
+
+            points_by_player = sleeper.get_points_for_names(r.players, int(week))
+            details.append({
+                "team": r.team_name,
+                "roster_players": r.players,
+                "points_by_player": points_by_player
+            })
+
+            scored = {name: pts for name, pts in points_by_player.items() if pts is not None}
+            if scored:
+                top_name = max(scored, key=scored.get)
+                top_pts = scored[top_name]
+                player_performances.append(f"{r.team_name}'s top performer: {top_name} - {top_pts} points")
+                league_top.append((top_name, top_pts, r.team_name))
+
+        if league_top:
+            league_top.sort(key=lambda x: x[1], reverse=True)
+            best_name, best_pts, best_team = league_top[0]
+            player_performances.append(f"League-wide highest individual scorer: {best_name} ({best_team}) with {best_pts} points")
+
+        return jsonify({
+            "status": "ok",
+            "week": week,
+            "player_performances_that_would_be_sent_to_claude": player_performances,
+            "per_team_detail": details
+        })
+    except Exception as e:
+        logger.error(f"Debug player performances failed: {str(e)}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
 @app.route('/api/debug/league-state', methods=['GET'])
 def debug_league_state():
     try:
