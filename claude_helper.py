@@ -8,14 +8,16 @@ logger = logging.getLogger(__name__)
 
 RECAP_PROMPT = """You are a sports analyst creating an entertaining, PG-13 weekly fantasy football recap for a league called "{league_name}".
 
-Here are the current standings and rosters:
+CONFIRMED REAL MATCHUPS AND SCORES FOR THIS WEEK (the actual games that were played - use ONLY these pairings, never guess or invent who played whom):
+{week_matchups}
 
+Season-long standings for context (wins/losses/total points across the whole season so far):
 {standings}
 
 Write like a real sports column, not a spreadsheet read aloud. Every matchup this week deserves at least a mention - nobody gets skipped entirely - but you don't have to spend equal time on all of them. Move quickly through the unremarkable, forgettable games (a sharp one-liner is plenty), and spend real space on the games that actually deserve it. Structure it like this:
 
 1. A short, punchy opening (2-3 sentences max) setting the tone for the week.
-2. Game Rundown - go through EVERY matchup this week. For most games, one roasting one-liner with the score is enough. For the Blowout of the Week (biggest margin), give it real space and roast it properly. For the Closest Game (smallest margin), build some tension describing how it came down to the wire. Don't just list scores - find an angle, a jab, a joke for every single game.
+2. Game Rundown - go through EVERY matchup listed in the CONFIRMED REAL MATCHUPS section above, using the exact pairings and scores given there. Do not invent or guess pairings - only use the real head-to-head matchups provided. For most games, one roasting one-liner with the score is enough. For the Blowout of the Week (biggest margin among the real matchups above), give it real space and roast it properly. For the Closest Game (smallest margin among the real matchups above), build some tension describing how it came down to the wire. Don't just list scores - find an angle, a jab, a joke for every single game.
 3. One Spicy Hot Take - a bold, opinionated claim about a team or trend this week (not just a recap of a score).
 4. Power Rankings - a QUICK numbered list of every team, name only, no commentary per team (this is a reference list, not the main event).
 5. Punishment Watch - a short, funny call-out of whoever's in last place.
@@ -136,7 +138,7 @@ def _parse_json_safely(raw_text, fallback):
             return fallback(raw_text)
         return fallback
 
-def generate_recap(league_id, week, player_performances=None):
+def generate_recap(league_id, week, player_performances=None, week_matchups=None):
     try:
         client = anthropic.Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
 
@@ -152,9 +154,11 @@ def generate_recap(league_id, week, player_performances=None):
         ])
 
         player_performances_text = chr(10).join(player_performances) if player_performances else "No individual player performance data available for this week."
+        week_matchups_text = chr(10).join(week_matchups) if week_matchups else "No confirmed matchup data available for this week - do not invent pairings, just discuss the season standings and player performances above."
 
         prompt = RECAP_PROMPT.format(
             league_name=league.name,
+            week_matchups=week_matchups_text,
             standings=standings_text,
             player_performances=player_performances_text
         )
