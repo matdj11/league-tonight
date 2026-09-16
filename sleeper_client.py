@@ -1,6 +1,7 @@
 import requests
 import logging
 import re
+import time
 from datetime import datetime
 from database import db_session, League, Roster
 import uuid
@@ -30,6 +31,7 @@ class SleeperClient:
         self.session = requests.Session()
         self._players_cache = None
         self._name_to_team_cache = None
+        self._weekly_stats_cache = {}
     
     def get_league(self, league_id):
         try:
@@ -99,6 +101,7 @@ class SleeperClient:
             if full_name and team:
                 key = _normalize_name(full_name)
                 index[key] = {
+                    "player_id": player_id,
                     "team": team,
                     "position": info.get("position"),
                     "injury_status": info.get("injury_status"),
@@ -107,6 +110,52 @@ class SleeperClient:
 
         self._name_to_team_cache = index
         return index
+
+    def get_weekly_stats(self, season, week):
+        cache_key = f"{season}_{week}"
+        now = time.time()
+        cached = self._weekly_stats_cache.get(cache_key)
+        if cached and (now - cached["time"]) < 900:
+            return cached["data"]
+        try:
+            url = f"{BASE_URL}/stats/nfl/regular/{season}/{week}"
+            response = self.session.get(url, timeout=15)
+            response.raise_for_status()
+            data = response.json()
+            self._weekly_stats_cache[cache_key] = {"data": data, "time": now}
+            return data
+        except Exception as e:
+            logger.warning(f"Could not fetch weekly stats for {season} week {week}: {str(e)}")
+            return cached["data"] if cached else {}
+
+    def get_points_for_names(self, player_names, week, season=2026):
+        """Return dict of player_name (as given) -> real scored fantasy
+        points (PPR preferred, falls back to standard) for that week,
+        or None if the player has no stats for that week."""
+        if not player_names:
+            return {}
+        index = self._build_name_to_team_index()
+        stats = self.get_weekly_stats(season, week)
+
+        results = {}
+        for name in player_names:
+            key = _normalize_name(name)
+            entry = index.get(key)
+            if not entry:
+                results[name] = None
+                continue
+            player_stats = stats.get(entry["player_id"])
+            if not player_stats:
+                results[name] = None
+                continue
+            points = player_stats.get("pts_ppr")
+            if points is None:
+                points = player_stats.get("pts_half_ppr")
+            if points is None:
+                points = player_stats.get("pts_std")
+            results[name] = round(points, 1) if points is not None else None
+
+        return results
 
     def resolve_team_for_name(self, name):
         try:
