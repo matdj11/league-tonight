@@ -6,22 +6,21 @@ from database import db_session, League, Roster
 
 logger = logging.getLogger(__name__)
 
-RECAP_PROMPT = """You are a sports analyst creating an entertaining weekly fantasy football recap for a league called "{league_name}".
+RECAP_PROMPT = """You are a sports analyst creating an entertaining, PG-13 weekly fantasy football recap for a league called "{league_name}".
 
 Here are the current standings and rosters:
 
 {standings}
 
-Write like a real sports column, not a spreadsheet read aloud. Focus on the 3-4 most interesting STORYLINES of the week rather than commenting on every single team - a good recap picks its moments instead of running through the whole league one by one. Include:
+Write like a real sports column, not a spreadsheet read aloud. Every matchup this week deserves at least a mention - nobody gets skipped entirely - but you don't have to spend equal time on all of them. Move quickly through the unremarkable, forgettable games (a sharp one-liner is plenty), and spend real space on the games that actually deserve it. Structure it like this:
 
 1. A short, punchy opening (2-3 sentences max) setting the tone for the week.
-2. The Blowout of the Week - the biggest margin of victory. Have fun with how one-sided it was, roast it a little.
-3. The Closest Game - the smallest margin. Build some tension describing how close it was.
-4. One Spicy Hot Take - a bold, opinionated claim about a team or trend this week (not just a recap of a score).
-5. Power Rankings - a QUICK numbered list of every team, name only, no commentary per team (this is a reference list, not the main event - keep it terse so the real writing above gets the space).
-6. Punishment Watch - a short, funny call-out of whoever's in last place.
+2. Game Rundown - go through EVERY matchup this week. For most games, one roasting one-liner with the score is enough. For the Blowout of the Week (biggest margin), give it real space and roast it properly. For the Closest Game (smallest margin), build some tension describing how it came down to the wire. Don't just list scores - find an angle, a jab, a joke for every single game.
+3. One Spicy Hot Take - a bold, opinionated claim about a team or trend this week (not just a recap of a score).
+4. Power Rankings - a QUICK numbered list of every team, name only, no commentary per team (this is a reference list, not the main event).
+5. Punishment Watch - a short, funny call-out of whoever's in last place.
 
-Keep the tone sharp, a little trash-talky, genuinely funny - like a real fantasy football column people actually enjoy reading, not a formulaic report. Use real team names and scores. Use emojis sparingly.
+Tone: PG-13, genuinely funny, willing to roast people's rosters and decisions with a bit of edge - like a real fantasy football column with some bite, not a sanitized corporate report. Playful trash talk is encouraged. Keep it good-natured even when it's savage - the goal is "everyone laughs, including the team getting roasted," not genuine meanness. Use real team names and scores. Use emojis sparingly.
 
 You also have REAL individual player performances for this week below. Use these when they help tell a story (e.g. a standout performance driving a win, or a stud dud dragging a team down) - never invent a player's points, only reference what's given:
 
@@ -162,7 +161,7 @@ def generate_recap(league_id, week, player_performances=None):
 
         message = client.messages.create(
             model="claude-sonnet-5",
-            max_tokens=2048,
+            max_tokens=3072,
             messages=[
                 {"role": "user", "content": prompt}
             ]
@@ -686,7 +685,9 @@ Week: {week}
 Recap content to cover:
 {recap_text}
 
-Write a natural back-and-forth script between two hosts named Jordan and Casey. Include interruptions, reactions, and banter - not just alternating monologues. Cover the real content above but make it entertaining. Keep it to about 8-16 lines total, each line short (1-3 sentences).
+IMPORTANT: Do NOT try to cover everything from the recap or read it verbatim. Pick the best 3-5 highlights - the biggest blowout, the craziest close game, the spiciest hot take, a couple of the funniest roasts - and have the hosts riff on THOSE specifically, like two people who both read the article and are excitedly reacting to the best parts. Skip the boring/forgettable games entirely rather than mentioning all of them.
+
+Write a natural back-and-forth script between two hosts named Jordan and Casey. Include interruptions, reactions, and banter - not just alternating monologues. Keep it to about 8-16 lines total, each line short (1-3 sentences).
 
 Respond ONLY as a JSON object in this exact shape, no other text:
 {{
