@@ -161,7 +161,7 @@ def generate_recap(league_id, week, player_performances=None):
 
         message = client.messages.create(
             model="claude-sonnet-5",
-            max_tokens=3072,
+            max_tokens=4096,
             messages=[
                 {"role": "user", "content": prompt}
             ]
