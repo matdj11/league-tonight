@@ -316,7 +316,31 @@ def generate_recap_endpoint():
         league = db_session.query(League).filter_by(league_id=league_id).first()
         if not league:
             return jsonify({"status": "league not found"}), 404
-        recap_content = generate_recap(league_id, week)
+
+        player_performances = []
+        try:
+            if week.isdigit():
+                rosters = db_session.query(Roster).filter_by(league_id=league_id).all()
+                league_top = []
+                for r in rosters:
+                    if not r.players:
+                        continue
+                    points_by_player = sleeper.get_points_for_names(r.players, int(week))
+                    scored = {name: pts for name, pts in points_by_player.items() if pts is not None}
+                    if scored:
+                        top_name = max(scored, key=scored.get)
+                        top_pts = scored[top_name]
+                        player_performances.append(f"{r.team_name}'s top performer: {top_name} - {top_pts} points")
+                        league_top.append((top_name, top_pts, r.team_name))
+
+                if league_top:
+                    league_top.sort(key=lambda x: x[1], reverse=True)
+                    best_name, best_pts, best_team = league_top[0]
+                    player_performances.append(f"League-wide highest individual scorer: {best_name} ({best_team}) with {best_pts} points")
+        except Exception as e:
+            logger.warning(f"Could not compute player performances: {str(e)}")
+
+        recap_content = generate_recap(league_id, week, player_performances=player_performances)
         recap = Recap(
             id=str(uuid.uuid4()),
             league_id=league_id,
