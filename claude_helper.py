@@ -751,6 +751,30 @@ def generate_season_preview(league_id):
         if not rosters:
             return {"error": "No roster data yet"}
 
+        standings_text = chr(10).join([
+            f"{r.team_name}: {r.wins}-{r.losses}, {r.points_for} points for, {r.points_against} points against"
+            for r in rosters
+        ])
+
+        injuries_lines = []
+        try:
+            from sleeper_client import SleeperClient
+            _sleeper = SleeperClient()
+            for r in rosters:
+                if not r.players:
+                    continue
+                hurt = []
+                for name in r.players:
+                    info = _sleeper.resolve_player_info_for_name(name)
+                    if info and info.get("injury_status"):
+                        hurt.append(f"{name} ({info['injury_status']})")
+                if hurt:
+                    injuries_lines.append(f"{r.team_name}: {', '.join(hurt)}")
+        except Exception as e:
+            logger.warning(f"Could not fetch injuries for season preview: {str(e)}")
+
+        injuries_text = chr(10).join(injuries_lines) if injuries_lines else "No notable injuries reported."
+
         teams_text = chr(10).join([
             f"{r.team_name}: {', '.join(r.players[:10]) if r.players else 'No players listed'}"
             for r in rosters
@@ -758,12 +782,14 @@ def generate_season_preview(league_id):
 
         prompt = SEASON_PREVIEW_PROMPT.format(
             league_name=league.name if league else "the league",
+            standings=standings_text,
+            injuries=injuries_text,
             teams=teams_text
         )
 
         message = client.messages.create(
             model="claude-sonnet-5",
-            max_tokens=3072,
+            max_tokens=4096,
             messages=[
                 {"role": "user", "content": prompt}
             ]
