@@ -741,7 +741,7 @@ def generate_recap_podcast_script(league_name, week, recap_html):
         logger.error(f"Error generating recap podcast script with Claude: {str(e)}")
         return {"script": [], "error": str(e)}
 
-def generate_season_preview(league_id):
+def generate_season_preview(league_id, injuries_text=None):
     try:
         client = anthropic.Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
 
@@ -756,24 +756,8 @@ def generate_season_preview(league_id):
             for r in rosters
         ])
 
-        injuries_lines = []
-        try:
-            from sleeper_client import SleeperClient
-            _sleeper = SleeperClient()
-            for r in rosters:
-                if not r.players:
-                    continue
-                hurt = []
-                for name in r.players:
-                    info = _sleeper.resolve_player_info_for_name(name)
-                    if info and info.get("injury_status"):
-                        hurt.append(f"{name} ({info['injury_status']})")
-                if hurt:
-                    injuries_lines.append(f"{r.team_name}: {', '.join(hurt)}")
-        except Exception as e:
-            logger.warning(f"Could not fetch injuries for season preview: {str(e)}")
-
-        injuries_text = chr(10).join(injuries_lines) if injuries_lines else "No notable injuries reported."
+        if injuries_text is None:
+            injuries_text = "No notable injuries reported."
 
         teams_text = chr(10).join([
             f"{r.team_name}: {', '.join(r.players[:10]) if r.players else 'No players listed'}"
