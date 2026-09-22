@@ -1242,10 +1242,23 @@ def debug_league_state():
             for m in matchups
         ]
 
+        recaps = db_session.query(Recap).filter_by(league_id=league_id).order_by(Recap.created_at.desc()).all()
+        recap_data = [
+            {
+                "id": r.id,
+                "week": r.week,
+                "week_repr": repr(r.week),
+                "status": r.status,
+                "created_at": r.created_at.isoformat() if r.created_at else None
+            }
+            for r in recaps
+        ]
+
         return jsonify({
             "status": "ok",
             "rosters": roster_data,
-            "matchups": matchup_data
+            "matchups": matchup_data,
+            "recaps": recap_data
         })
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
