@@ -1,5 +1,6 @@
 import requests
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -11,12 +12,22 @@ ESPN_ABBR_FIX = {
     "LA": "LAR",
 }
 
+_weather_cache = None
+_weather_cache_time = 0
+WEATHER_CACHE_TTL = 1800  # 30 minutes
+
+
 def get_weather_by_team():
     """Fetch this week's NFL scoreboard from ESPN and return a dict of
     team_abbr -> weather summary string. ESPN only attaches weather data
     to games where it's actually relevant (outdoor stadiums with real
     conditions) - domes and non-issues are simply absent, so no game
     appearing here means weather isn't a factor for that team this week."""
+    global _weather_cache, _weather_cache_time
+    now = time.time()
+    if _weather_cache is not None and (now - _weather_cache_time) < WEATHER_CACHE_TTL:
+        return _weather_cache
+
     try:
         response = requests.get(SCOREBOARD_URL, timeout=10)
         response.raise_for_status()
@@ -47,10 +58,12 @@ def get_weather_by_team():
                     if abbr:
                         weather_by_team[abbr] = summary
 
+        _weather_cache = weather_by_team
+        _weather_cache_time = now
         return weather_by_team
     except Exception as e:
         logger.warning(f"Could not fetch weather data: {str(e)}")
-        return {}
+        return _weather_cache if _weather_cache is not None else {}
 
 
 def build_weather_notes(name_to_team, weather_by_team):
@@ -66,18 +79,37 @@ def build_weather_notes(name_to_team, weather_by_team):
 
 NEWS_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/news?limit=50"
 
-def get_relevant_news(player_names):
-    """Fetch recent NFL news headlines from ESPN's public feed and return
-    only the ones that mention a player from the given roster. This is a
-    real, live check - no manual uploading, no guessing."""
-    if not player_names:
-        return []
+_news_cache = None
+_news_cache_time = 0
+NEWS_CACHE_TTL = 900  # 15 minutes
+
+
+def _get_cached_articles():
+    global _news_cache, _news_cache_time
+    now = time.time()
+    if _news_cache is not None and (now - _news_cache_time) < NEWS_CACHE_TTL:
+        return _news_cache
     try:
         response = requests.get(NEWS_URL, timeout=10)
         response.raise_for_status()
         data = response.json()
-
         articles = data.get("articles", [])
+        _news_cache = articles
+        _news_cache_time = now
+        return articles
+    except Exception as e:
+        logger.warning(f"Could not fetch news data: {str(e)}")
+        return _news_cache if _news_cache is not None else []
+
+
+def get_relevant_news(player_names):
+    """Return news items mentioning any of the given player names, using a
+    cached copy of ESPN's recent headlines (refreshed at most every 15 min)
+    instead of re-fetching the whole feed on every call."""
+    if not player_names:
+        return []
+    try:
+        articles = _get_cached_articles()
         relevant = []
 
         for name in player_names:
