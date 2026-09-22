@@ -21,8 +21,11 @@ from espn_data import get_weather_by_team, build_weather_notes, get_relevant_new
 from fantasypros_data import get_projected_points_for_names, build_projection_notes, get_current_nfl_week
 from elevenlabs_data import pick_two_voice_ids, synthesize_script
 from claude_helper import generate_recap, generate_draft_recap, generate_briefing, generate_season_preview, ai_resolve_team_for_names, generate_lineup_suggestion, generate_matchup_preview, ai_resolve_player_info_for_names, generate_waiver_suggestions, generate_ask_response, generate_podcast_script, generate_recap_podcast_script
+import time as _time
 
 sleeper = SleeperClient()
+_matchup_preview_cache = {}
+MATCHUP_PREVIEW_CACHE_TTL = 1800  # 30 minutes
 
 @app.teardown_appcontext
 def shutdown_session(exception=None):
@@ -579,7 +582,25 @@ def generate_season_preview_endpoint():
         if not league_id:
             return jsonify({"status": "error", "error": "league_id required"}), 400
 
-        preview_data = generate_season_preview(league_id)
+        injuries_lines = []
+        try:
+            rosters = db_session.query(Roster).filter_by(league_id=league_id).all()
+            for r in rosters:
+                if not r.players:
+                    continue
+                hurt = []
+                for name in r.players:
+                    info = sleeper.resolve_player_info_for_name(name)
+                    if info and info.get("injury_status"):
+                        hurt.append(f"{name} ({info['injury_status']})")
+                if hurt:
+                    injuries_lines.append(f"{r.team_name}: {', '.join(hurt)}")
+        except Exception as e:
+            logger.warning(f"Could not compute injuries for season preview: {str(e)}")
+
+        injuries_text = chr(10).join(injuries_lines) if injuries_lines else "No notable injuries reported."
+
+        preview_data = generate_season_preview(league_id, injuries_text=injuries_text)
 
         return jsonify({
             "status": "generated",
@@ -691,6 +712,10 @@ def set_matchup_opponent():
             db_session.add(new_matchup)
 
         db_session.commit()
+
+        _matchup_preview_cache.pop(f"{league_id}:{team_id}:{week}", None)
+        _matchup_preview_cache.pop(f"{league_id}:{opponent_team_id}:{week}", None)
+
         return jsonify({"status": "saved", "week": week})
     except Exception as e:
         logger.error(f"Set matchup opponent failed: {str(e)}")
@@ -734,27 +759,34 @@ def get_current_matchup():
                     parts.append(f"{slot.get('slot')}: {slot.get('player')}")
             return ", ".join(parts) if parts else None
 
-        my_lineup_text = None
-        opp_lineup_text = None
-        try:
-            my_lineup_data = generate_lineup_suggestion(league_id, team_id)
-            my_lineup_text = _format_lineup(my_lineup_data)
-        except Exception as e:
-            logger.warning(f"Could not generate own lineup for matchup: {str(e)}")
-        try:
-            opp_lineup_data = generate_lineup_suggestion(league_id, opponent_id)
-            opp_lineup_text = _format_lineup(opp_lineup_data)
-        except Exception as e:
-            logger.warning(f"Could not generate opponent lineup for matchup: {str(e)}")
+        cache_key = f"{league_id}:{team_id}:{week}"
+        now = _time.time()
+        cached = _matchup_preview_cache.get(cache_key)
+        if cached and (now - cached["time"]) < MATCHUP_PREVIEW_CACHE_TTL:
+            preview = cached["preview"]
+        else:
+            my_lineup_text = None
+            opp_lineup_text = None
+            try:
+                my_lineup_data = generate_lineup_suggestion(league_id, team_id)
+                my_lineup_text = _format_lineup(my_lineup_data)
+            except Exception as e:
+                logger.warning(f"Could not generate own lineup for matchup: {str(e)}")
+            try:
+                opp_lineup_data = generate_lineup_suggestion(league_id, opponent_id)
+                opp_lineup_text = _format_lineup(opp_lineup_data)
+            except Exception as e:
+                logger.warning(f"Could not generate opponent lineup for matchup: {str(e)}")
 
-        preview = generate_matchup_preview(
-            my_roster.team_name if my_roster else "Your team",
-            (my_roster.players or []) if my_roster else [],
-            opponent_name,
-            (opp_roster.players or []) if opp_roster else [],
-            team_a_lineup=my_lineup_text,
-            team_b_lineup=opp_lineup_text
-        )
+            preview = generate_matchup_preview(
+                my_roster.team_name if my_roster else "Your team",
+                (my_roster.players or []) if my_roster else [],
+                opponent_name,
+                (opp_roster.players or []) if opp_roster else [],
+                team_a_lineup=my_lineup_text,
+                team_b_lineup=opp_lineup_text
+            )
+            _matchup_preview_cache[cache_key] = {"preview": preview, "time": now}
 
         return jsonify({
             "status": "ok",
