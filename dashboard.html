@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>League Tonight - Dashboard</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -11,60 +12,292 @@
         .card { background: #151B29; border: 1px solid #2A3245; border-radius: 12px; padding: 24px; margin-bottom: 20px; }
         .card h2 { font-size: 18px; margin-bottom: 12px; }
         .card p { color: #8B93A7; line-height: 1.6; margin-bottom: 12px; }
-        .btn { display: inline-block; background: #FFB020; color: #3A2600; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; border: none; cursor: pointer; }
+        .btn { display: inline-block; background: #FFB020; color: #3A2600; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; border: none; cursor: pointer; font-size: 14px; }
         .btn:hover { background: #E6A018; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
         .status { display: inline-block; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: 600; }
         .status.draft { background: #8A6318; color: #FFB020; }
         .status.published { background: #1F5A50; color: #5EEAD4; }
         .link { color: #5EEAD4; text-decoration: none; word-break: break-all; }
         .link:hover { text-decoration: underline; }
+        textarea { width: 100%; min-height: 200px; padding: 12px; background: #0B0F17; border: 1px solid #2A3245; border-radius: 8px; color: #F5F3EE; font-size: 13px; font-family: monospace; margin-bottom: 12px; resize: vertical; }
+        .msg { margin-top: 12px; font-size: 13px; color: #8B93A7; min-height: 18px; }
+        .msg.success { color: #5EEAD4; }
+        .msg.error { color: #FF6B5E; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>{{ league.name }}</h1>
         <p class="subtitle">Commissioner Dashboard</p>
-        
+
         <div class="card">
             <h2>League Information</h2>
             <p><strong>League ID:</strong> {{ league.league_id }}</p>
             <p><strong>Platform:</strong> {{ league.platform|upper }}</p>
             <p><strong>Created:</strong> {{ league.created_at.strftime('%B %d, %Y') }}</p>
         </div>
-        
+
         {% if latest_recap %}
         <div class="card">
             <h2>Latest Recap</h2>
             <p><strong>Week:</strong> {{ latest_recap.week }}</p>
             <p><strong>Status:</strong> <span class="status {{ latest_recap.status }}">{{ latest_recap.status|upper }}</span></p>
             <p><strong>Generated:</strong> {{ latest_recap.created_at.strftime('%B %d, %Y at %I:%M %p') }}</p>
-            
-            {% if latest_recap.status == 'published' %}
-            <p><strong>Shareable Link:</strong></p>
-            <p><a href="{{ latest_recap.shareable_link }}" class="link">{{ latest_recap.shareable_link }}</a></p>
-            {% endif %}
         </div>
         {% endif %}
-        
+
         <div class="card">
-            <h2>Generate This Week's Recap</h2>
-            <p>Click below to generate a new League Tonight recap from this week's matchups.</p>
-            <form method="POST" action="/api/recap/generate">
-                <button type="submit" class="btn">Generate Recap</button>
-            </form>
+            <h2>Update Weekly Matchups & Scores</h2>
+            <p>Pick a week, set who played who, and enter each team's score. Total wins/losses/points are calculated automatically from every week's results.</p>
+            <div style="margin-bottom:16px;">
+                <div style="font-size:11px; color:#8B93A7; margin-bottom:4px;">Week</div>
+                <select id="week-select" style="width:160px; padding:10px; background:#0B0F17; border:1px solid #2A3245; border-radius:8px; color:#F5F3EE;" onchange="loadMatchupsForWeek()"></select>
+            </div>
+            <div id="matchups-table" class="loading" style="color:#8B93A7; font-size:13px;">Select a week to begin.</div>
         </div>
-        
-        {% if latest_recap and latest_recap.status == 'draft' %}
+
+        <div class="card">
+            <h2>Paste Your Draft Results</h2>
+            <p>Paste your full draft results below (any format works - round by round, pick by pick, doesn't matter). We'll generate a fun AI draft recap from it.</p>
+            <textarea id="draft_text" placeholder="Paste your draft results here..."></textarea>
+            <button class="btn" id="draft_btn" onclick="generateDraftRecap()">Generate Draft Recap</button>
+            <div class="msg" id="draft_msg"></div>
+        </div>
+
+        <div class="card">
+            <h2>Generate Weekly Recap</h2>
+            <p>Generate a recap from that week's saved matchup scores.</p>
+            <input type="text" id="recap_week" placeholder="Week (e.g. 1, 2, 3...)" style="width:100%; padding:10px; background:#0B0F17; border:1px solid #2A3245; border-radius:8px; color:#F5F3EE; margin-bottom:12px;" />
+            <button class="btn" id="gen_btn" onclick="generateRecap()">Generate Recap</button>
+            <div class="msg" id="gen_msg"></div>
+        </div>
+
         <div class="card">
             <h2>Publish Recap</h2>
-            <p>Ready to share this week's recap with your league?</p>
-            <form method="POST" action="/api/recap/publish">
-                <input type="hidden" name="league_id" value="{{ league.league_id }}">
-                <input type="hidden" name="week" value="{{ latest_recap.week }}">
-                <button type="submit" class="btn">Publish to League</button>
-            </form>
+            <p>Publish the latest recap (draft or weekly) to get a shareable link.</p>
+            <input type="text" id="publish_week" placeholder="Week (e.g. draft or 1)" style="width:100%; padding:10px; background:#0B0F17; border:1px solid #2A3245; border-radius:8px; color:#F5F3EE; margin-bottom:12px;" />
+            <button class="btn" id="pub_btn" onclick="publishRecap()">Publish</button>
+            <div class="msg" id="pub_msg"></div>
         </div>
-        {% endif %}
     </div>
+
+    <script>
+        const leagueId = "{{ league.league_id }}";
+        let allTeams = [];
+
+        function populateWeekSelect() {
+            const select = document.getElementById('week-select');
+            let options = '<option value="">Select week...</option>';
+            for (let i = 1; i <= 18; i++) {
+                options += `<option value="${i}">Week ${i}</option>`;
+            }
+            select.innerHTML = options;
+        }
+
+        async function loadMatchupsForWeek() {
+            const week = document.getElementById('week-select').value;
+            const container = document.getElementById('matchups-table');
+            if (!week) {
+                container.innerHTML = 'Select a week to begin.';
+                return;
+            }
+
+            container.innerHTML = 'Loading...';
+
+            try {
+                if (allTeams.length === 0) {
+                    const teamsRes = await fetch(`/api/league/teams?league_id=${leagueId}`);
+                    const teamsData = await teamsRes.json();
+                    allTeams = teamsData.teams || [];
+                }
+
+                const matchupsRes = await fetch(`/api/league/matchups?league_id=${leagueId}&week=${week}`);
+                const matchupsData = await matchupsRes.json();
+                const existing = matchupsData.matchups || [];
+
+                const numRows = Math.max(Math.floor(allTeams.length / 2), existing.length, 1);
+                const teamOptions = allTeams.map(t => `<option value="${t.team_id}">${t.team_name}</option>`).join('');
+
+                let html = '';
+                for (let i = 0; i < numRows; i++) {
+                    const m = existing[i] || {};
+                    html += `
+                        <div class="matchup-row" style="border-bottom:1px solid #2A3245; padding:14px 0;">
+                            <div style="display:grid; grid-template-columns: 1fr 90px; gap:8px; align-items:end; margin-bottom:8px;">
+                                <div>
+                                    <div style="font-size:10px; color:#8B93A7; margin-bottom:4px;">Team A</div>
+                                    <select id="team1-${i}" style="width:100%; padding:8px; background:#0B0F17; border:1px solid #2A3245; border-radius:6px; color:#F5F3EE; font-size:13px;">
+                                        <option value="">Select team...</option>
+                                        ${teamOptions}
+                                    </select>
+                                </div>
+                                <div>
+                                    <div style="font-size:10px; color:#8B93A7; margin-bottom:4px;">Score</div>
+                                    <input type="number" step="0.1" id="score1-${i}" value="${m.team_1_score || ''}" style="width:100%; padding:8px; background:#0B0F17; border:1px solid #2A3245; border-radius:6px; color:#F5F3EE; font-size:13px;" />
+                                </div>
+                            </div>
+                            <div style="display:grid; grid-template-columns: 1fr 90px; gap:8px; align-items:end; margin-bottom:8px;">
+                                <div>
+                                    <div style="font-size:10px; color:#8B93A7; margin-bottom:4px;">Team B</div>
+                                    <select id="team2-${i}" style="width:100%; padding:8px; background:#0B0F17; border:1px solid #2A3245; border-radius:6px; color:#F5F3EE; font-size:13px;">
+                                        <option value="">Select team...</option>
+                                        ${teamOptions}
+                                    </select>
+                                </div>
+                                <div>
+                                    <div style="font-size:10px; color:#8B93A7; margin-bottom:4px;">Score</div>
+                                    <input type="number" step="0.1" id="score2-${i}" value="${m.team_2_score || ''}" style="width:100%; padding:8px; background:#0B0F17; border:1px solid #2A3245; border-radius:6px; color:#F5F3EE; font-size:13px;" />
+                                </div>
+                            </div>
+                            <button class="btn" style="padding:8px 14px; font-size:12px;" onclick="saveMatchupRow(${i})">Save Matchup</button>
+                            <div class="msg" id="matchup-msg-${i}" style="margin-top:6px; font-size:12px;"></div>
+                        </div>
+                    `;
+                }
+                container.innerHTML = html;
+
+                existing.forEach((m, i) => {
+                    const t1 = document.getElementById(`team1-${i}`);
+                    const t2 = document.getElementById(`team2-${i}`);
+                    if (t1) t1.value = m.team_1_id;
+                    if (t2) t2.value = m.team_2_id;
+                });
+            } catch (err) {
+                container.innerHTML = `<p style="color:#FF6B5E;">${err.message}</p>`;
+            }
+        }
+
+        async function saveMatchupRow(rowIndex) {
+            const week = document.getElementById('week-select').value;
+            const msg = document.getElementById(`matchup-msg-${rowIndex}`);
+            const team1Id = document.getElementById(`team1-${rowIndex}`).value;
+            const team2Id = document.getElementById(`team2-${rowIndex}`).value;
+            const score1 = document.getElementById(`score1-${rowIndex}`).value;
+            const score2 = document.getElementById(`score2-${rowIndex}`).value;
+
+            if (!team1Id || !team2Id) {
+                msg.textContent = 'Please select both teams.';
+                msg.className = 'msg error';
+                return;
+            }
+            if (team1Id === team2Id) {
+                msg.textContent = 'Teams must be different.';
+                msg.className = 'msg error';
+                return;
+            }
+
+            msg.textContent = 'Saving...';
+            msg.className = 'msg';
+
+            try {
+                const res = await fetch('/api/matchup/set-score', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        league_id: leagueId,
+                        week: week,
+                        team_1_id: team1Id,
+                        team_2_id: team2Id,
+                        team_1_score: score1,
+                        team_2_score: score2
+                    })
+                });
+                const data = await res.json();
+                if (data.status !== 'saved') throw new Error(data.error || 'Failed to save.');
+
+                msg.textContent = 'Saved! Totals updated automatically.';
+                msg.className = 'msg success';
+            } catch (err) {
+                msg.textContent = err.message;
+                msg.className = 'msg error';
+            }
+        }
+
+        populateWeekSelect();
+
+        async function generateDraftRecap() {
+            const btn = document.getElementById('draft_btn');
+            const msg = document.getElementById('draft_msg');
+            const text = document.getElementById('draft_text').value.trim();
+
+            if (!text) {
+                msg.textContent = 'Please paste your draft results first.';
+                msg.className = 'msg error';
+                return;
+            }
+
+            btn.disabled = true;
+            msg.textContent = 'Generating draft recap with Claude...';
+            msg.className = 'msg';
+
+            try {
+                const res = await fetch('/api/recap/draft-manual', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ league_id: leagueId, draft_text: text })
+                });
+                const data = await res.json();
+                if (data.status !== 'draft recap generated') throw new Error(data.error || 'Failed to generate.');
+
+                msg.textContent = 'Draft recap generated! Set the week field below to "draft" and click Publish to share it.';
+                msg.className = 'msg success';
+            } catch (err) {
+                msg.textContent = err.message;
+                msg.className = 'msg error';
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function generateRecap() {
+            const btn = document.getElementById('gen_btn');
+            const msg = document.getElementById('gen_msg');
+            const week = document.getElementById('recap_week').value.trim();
+
+            if (!week) {
+                msg.textContent = 'Please enter a week number.';
+                msg.className = 'msg error';
+                return;
+            }
+
+            btn.disabled = true;
+            msg.textContent = 'Generating...';
+            msg.className = 'msg';
+            try {
+                const res = await fetch(`/api/recap/generate?league_id=${leagueId}&week=${encodeURIComponent(week)}`);
+                const data = await res.json();
+                if (data.status !== 'recap generated') throw new Error(data.error || 'Failed to generate.');
+                msg.textContent = `Recap generated for week ${data.week}. Now set the week field below to "${data.week}" and click Publish.`;
+                msg.className = 'msg success';
+            } catch (err) {
+                msg.textContent = err.message;
+                msg.className = 'msg error';
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function publishRecap() {
+            const btn = document.getElementById('pub_btn');
+            const msg = document.getElementById('pub_msg');
+            const week = document.getElementById('publish_week').value.trim() || '1';
+            btn.disabled = true;
+            msg.textContent = 'Publishing...';
+            msg.className = 'msg';
+            try {
+                const res = await fetch(`/api/recap/publish?league_id=${leagueId}&week=${week}`);
+                const data = await res.json();
+                if (data.status !== 'published') throw new Error(data.error || 'Failed to publish.');
+                msg.innerHTML = `Published! Shareable link: <a href="${data.shareable_link}" class="link">${data.shareable_link}</a>`;
+                msg.className = 'msg success';
+            } catch (err) {
+                msg.textContent = err.message;
+                msg.className = 'msg error';
+            } finally {
+                btn.disabled = false;
+            }
+        }
+    </script>
 </body>
 </html>
